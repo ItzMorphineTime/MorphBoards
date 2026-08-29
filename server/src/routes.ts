@@ -7,7 +7,7 @@ import * as unzipper from 'unzipper';
 import type { FastifyInstance } from 'fastify';
 import { type BoardDoc, newId } from '@morphboards/shared';
 import * as db from './db';
-import { boardAssetsDir, thumbnailPath, tmpDir } from './paths';
+import { assetsDir, boardAssetsDir, thumbnailPath, tmpDir } from './paths';
 
 const MIME_EXT: Record<string, string> = {
   'image/png': 'png',
@@ -142,6 +142,30 @@ export function registerRoutes(app: FastifyInstance): void {
       fs.rmSync(path.join(dir, filename), { force: true });
       return reply.code(413).send({ error: 'File too large' });
     }
+    return { assetId, url: `/files/${id}/${filename}` };
+  });
+
+  /**
+   * Copy an existing asset (usually from another board) into this board's
+   * folder — used when pasting image elements across boards so every board
+   * owns the files it references.
+   */
+  app.post('/api/boards/:id/assets/copy', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!db.boardExists(id)) return reply.code(404).send({ error: 'Board not found' });
+    const body = (req.body ?? {}) as { sourceUrl?: string };
+    const match = /^\/files\/([\w-]+)\/([\w.-]+)$/.exec(body.sourceUrl ?? '');
+    if (!match) return reply.code(400).send({ error: 'Invalid sourceUrl' });
+    const [, srcBoard, name] = match;
+    const srcPath = path.join(assetsDir, srcBoard, name);
+    if (!fs.existsSync(srcPath)) return reply.code(404).send({ error: 'Source asset not found' });
+
+    const ext = path.extname(name).slice(1).toLowerCase() || 'bin';
+    const assetId = newId();
+    const dir = boardAssetsDir(id);
+    fs.mkdirSync(dir, { recursive: true });
+    const filename = `${assetId}.${ext}`;
+    fs.copyFileSync(srcPath, path.join(dir, filename));
     return { assetId, url: `/files/${id}/${filename}` };
   });
 

@@ -40,6 +40,11 @@ export const api = {
   deleteBoard: (id: string) => request<{ ok: true }>(`/api/boards/${id}`, { method: 'DELETE' }),
   duplicateBoard: (id: string) =>
     request<BoardMeta>(`/api/boards/${id}/duplicate`, { method: 'POST' }),
+  copyAsset: (boardId: string, sourceUrl: string) =>
+    request<AssetUploadResult>(
+      `/api/boards/${boardId}/assets/copy`,
+      jsonInit('POST', { sourceUrl }),
+    ),
   uploadAsset: (boardId: string, file: File | Blob, filename?: string) => {
     const form = new FormData();
     form.append('file', file, filename ?? (file instanceof File ? file.name : 'pasted.png'));

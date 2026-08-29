@@ -100,18 +100,87 @@ function placeText(content: string, at: Point): void {
   ui().setSelection([el.id]);
 }
 
-/** "Paste here" from the context menu: internal clipboard first, then OS text. */
+/**
+ * Pasted image elements can reference assets of another board. Copy those
+ * files into the current board (server-side) and swap the URLs, so the board
+ * owns everything it shows and exports stay complete.
+ */
+export function rehomeForeignImages(els: BoardElement[]): void {
+  const boardId = board().boardId;
+  if (!boardId) return;
+  const ownPrefix = `/files/${boardId}/`;
+  for (const el of els) {
+    if (el.type !== 'image') continue;
+    if (!el.assetUrl.startsWith('/files/') || el.assetUrl.startsWith(ownPrefix)) continue;
+    void api
+      .copyAsset(boardId, el.assetUrl)
+      .then((r) => {
+        // silent: the paste itself is the undo step, the URL swap is bookkeeping
+        if (board().elements[el.id]) board().silentUpdate({ [el.id]: { assetUrl: r.url } });
+      })
+      .catch((err: Error) => console.error('Asset copy failed', err));
+  }
+}
+
+function pasteSentinelPayload(text: string, at: Point): boolean {
+  const payload = parseClipboardText(text);
+  if (!payload) return false;
+  rehomeForeignImages(pastePayload(payload, at));
+  return true;
+}
+
+function handleTextContent(text: string, at: Point): void {
+  if (looksLikeUrl(text)) placeLink(text, at);
+  else placeText(text, at);
+}
+
+/**
+ * "Paste here" from the context menu. Reads the OS clipboard (text + images)
+ * via the async clipboard API; falls back to text-only, then to the
+ * in-memory clipboard when clipboard access is blocked.
+ */
 export async function pasteAt(at: Point): Promise<void> {
-  if (pasteInternal(at)) return;
   try {
-    const text = await navigator.clipboard.readText();
-    if (!text) return;
-    const payload = parseClipboardText(text);
-    if (payload) pastePayload(payload, at);
-    else if (looksLikeUrl(text)) placeLink(text, at);
-    else placeText(text, at);
+    const items = await navigator.clipboard.read();
+    // our own copies carry the sentinel — prefer internal paste over re-upload
+    for (const item of items) {
+      if (!item.types.includes('text/plain')) continue;
+      const text = await (await item.getType('text/plain')).text();
+      if (pasteSentinelPayload(text, at)) return;
+    }
+    const imageBlobs: Blob[] = [];
+    for (const item of items) {
+      const type = item.types.find((t) => t.startsWith('image/'));
+      if (type) imageBlobs.push(await item.getType(type));
+    }
+    if (imageBlobs.length > 0) {
+      const files = imageBlobs.map(
+        (b, i) => new File([b], `pasted-${i + 1}.png`, { type: b.type || 'image/png' }),
+      );
+      await uploadImageFiles(files, at);
+      return;
+    }
+    for (const item of items) {
+      if (!item.types.includes('text/plain')) continue;
+      const text = (await (await item.getType('text/plain')).text()).trim();
+      if (text) {
+        handleTextContent(text, at);
+        return;
+      }
+    }
   } catch {
-    // clipboard read not permitted — nothing to paste
+    // clipboard.read unsupported or denied — try text, then internal memory
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        if (!pasteSentinelPayload(text, at)) handleTextContent(text, at);
+        return;
+      }
+    } catch {
+      // fall through to internal clipboard
+    }
+    const els = pasteInternal(at);
+    if (els) rehomeForeignImages(els);
   }
 }
 
@@ -149,6 +218,14 @@ export function handlePaste(e: ClipboardEvent): void {
   const data = e.clipboardData;
   if (!data) return;
 
+  // Copies made inside MorphBoards carry both sentinel text and (for images)
+  // a PNG. Check the sentinel first so internal pastes never re-upload.
+  const text = data.getData('text/plain');
+  if (text && pasteSentinelPayload(text, lastPointerWorld)) {
+    e.preventDefault();
+    return;
+  }
+
   const imageFiles: File[] = [];
   for (const item of data.items) {
     if (item.kind === 'file' && item.type.startsWith('image/')) {
@@ -162,15 +239,19 @@ export function handlePaste(e: ClipboardEvent): void {
     return;
   }
 
-  const text = data.getData('text/plain');
-  if (!text) return;
-  e.preventDefault();
-  const payload = parseClipboardText(text);
-  if (payload) {
-    pastePayload(payload, lastPointerWorld);
-  } else if (looksLikeUrl(text)) {
-    placeLink(text, lastPointerWorld);
-  } else {
-    placeText(text, lastPointerWorld);
+  if (text) {
+    e.preventDefault();
+    handleTextContent(text, lastPointerWorld);
+    return;
+  }
+
+  // Truly empty event clipboard (e.g. the OS clipboard write failed after an
+  // in-app copy) — fall back to the in-memory clipboard.
+  if (data.items.length === 0) {
+    const els = pasteInternal(lastPointerWorld);
+    if (els) {
+      e.preventDefault();
+      rehomeForeignImages(els);
+    }
   }
 }

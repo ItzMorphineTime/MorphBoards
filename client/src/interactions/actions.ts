@@ -83,8 +83,45 @@ export function copySelection(): void {
   const payload = collectPayload();
   if (!payload) return;
   internalClipboard = payload;
-  // best effort: makes copy/paste work across boards and app restarts
-  void navigator.clipboard?.writeText(SENTINEL + JSON.stringify(payload)).catch(() => undefined);
+  const sentinel = SENTINEL + JSON.stringify(payload);
+  // Single image selected: put a real PNG on the OS clipboard too, so the
+  // image can be pasted into external apps. Otherwise plain sentinel text.
+  const only = payload.elements.length === 1 ? payload.elements[0] : null;
+  if (only?.type === 'image' && payload.connectors.length === 0) {
+    void writeImageClipboard(sentinel, only.assetUrl);
+  } else {
+    void navigator.clipboard?.writeText(sentinel).catch(() => undefined);
+  }
+}
+
+/** Write sentinel text + the asset as a PNG in one clipboard entry. */
+async function writeImageClipboard(sentinel: string, assetUrl: string): Promise<void> {
+  try {
+    if (typeof ClipboardItem === 'undefined') throw new Error('ClipboardItem unsupported');
+    const blob = await (await fetch(assetUrl)).blob();
+    let png = blob;
+    if (blob.type !== 'image/png') {
+      // the async clipboard only accepts PNG images
+      const bitmap = await createImageBitmap(blob);
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      canvas.getContext('2d')?.drawImage(bitmap, 0, 0);
+      bitmap.close();
+      const converted = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/png'));
+      if (!converted) throw new Error('PNG conversion failed');
+      png = converted;
+    }
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        'text/plain': new Blob([sentinel], { type: 'text/plain' }),
+        'image/png': png,
+      }),
+    ]);
+  } catch {
+    // clipboard images unavailable (permissions, decode failure) — text still works
+    void navigator.clipboard?.writeText(sentinel).catch(() => undefined);
+  }
 }
 
 export function cutSelection(): void {
@@ -103,7 +140,7 @@ export function parseClipboardText(text: string): ClipboardPayload | null {
   return null;
 }
 
-export function pastePayload(payload: ClipboardPayload, at?: Point): void {
+export function pastePayload(payload: ClipboardPayload, at?: Point): BoardElement[] {
   const idMap = new Map<string, string>();
   for (const el of payload.elements) idMap.set(el.id, newId());
 
@@ -157,12 +194,12 @@ export function pastePayload(payload: ClipboardPayload, at?: Point): void {
     els.map((el) => el.id),
     cs.map((c) => c.id),
   );
+  return els;
 }
 
-export function pasteInternal(at?: Point): boolean {
-  if (!internalClipboard) return false;
-  pastePayload(internalClipboard, at);
-  return true;
+export function pasteInternal(at?: Point): BoardElement[] | null {
+  if (!internalClipboard) return null;
+  return pastePayload(internalClipboard, at);
 }
 
 export function duplicateSelection(): void {
