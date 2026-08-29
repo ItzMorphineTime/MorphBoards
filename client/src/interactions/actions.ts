@@ -1,0 +1,207 @@
+import {
+  type Attachment,
+  type BoardElement,
+  type Connector,
+  newId,
+} from '@morphboards/shared';
+import { type Point, unionRects } from '../geometry/geo';
+import { useBoardStore } from '../state/boardStore';
+import { useUiStore } from '../state/uiStore';
+import { useViewportStore } from '../state/viewportStore';
+
+const board = () => useBoardStore.getState();
+const ui = () => useUiStore.getState();
+
+/** Selection plus frame children and attached comment pins (what moves together). */
+export function moveClosure(ids: readonly string[]): Set<string> {
+  const { elements } = board();
+  const set = new Set<string>();
+  for (const id of ids) {
+    if (elements[id] && !elements[id].locked) set.add(id);
+  }
+  for (const el of Object.values(elements)) {
+    if (el.frameId && set.has(el.frameId)) set.add(el.id);
+  }
+  for (const el of Object.values(elements)) {
+    if (el.type === 'comment' && el.attachedTo && set.has(el.attachedTo)) set.add(el.id);
+  }
+  return set;
+}
+
+export function deleteSelection(): void {
+  const { selection, selectedConnectors } = ui();
+  if (selection.length === 0 && selectedConnectors.length === 0) return;
+  board().removeMixed(selection, selectedConnectors);
+  ui().clearSelection();
+}
+
+export function deleteFrameWithContents(frameId: string): void {
+  const ids = [frameId, ...Array.from(moveClosure([frameId]))];
+  board().removeMixed(Array.from(new Set(ids)), []);
+  ui().clearSelection();
+}
+
+export function selectAll(): void {
+  const { elements, order, connectors } = board();
+  const ids = order.filter((id) => elements[id] && !elements[id].locked);
+  ui().setSelection(ids, Object.keys(connectors));
+}
+
+// ---------------------------------------------------------------------------
+// Clipboard
+
+interface ClipboardPayload {
+  elements: BoardElement[];
+  connectors: Connector[];
+}
+
+const SENTINEL = 'morphboards-clipboard:';
+let internalClipboard: ClipboardPayload | null = null;
+
+export function collectPayload(): ClipboardPayload | null {
+  const { selection, selectedConnectors } = ui();
+  const { elements, connectors } = board();
+  const ids = moveClosure(selection);
+  for (const id of selection) if (elements[id]) ids.add(id); // include locked if explicitly selected
+  const els = Array.from(ids)
+    .map((id) => elements[id])
+    .filter((el): el is BoardElement => Boolean(el));
+  const includesEnd = (att: Attachment) => att.kind === 'point' || ids.has(att.elementId);
+  const cs = Object.values(connectors).filter(
+    (c) =>
+      selectedConnectors.includes(c.id) ||
+      (ids.size > 0 &&
+        includesEnd(c.from) &&
+        includesEnd(c.to) &&
+        (c.from.kind === 'element' || c.to.kind === 'element')),
+  );
+  if (els.length === 0 && cs.length === 0) return null;
+  return JSON.parse(JSON.stringify({ elements: els, connectors: cs })) as ClipboardPayload;
+}
+
+export function copySelection(): void {
+  const payload = collectPayload();
+  if (!payload) return;
+  internalClipboard = payload;
+  // best effort: makes copy/paste work across boards and app restarts
+  void navigator.clipboard?.writeText(SENTINEL + JSON.stringify(payload)).catch(() => undefined);
+}
+
+export function cutSelection(): void {
+  copySelection();
+  deleteSelection();
+}
+
+export function parseClipboardText(text: string): ClipboardPayload | null {
+  if (!text.startsWith(SENTINEL)) return null;
+  try {
+    const payload = JSON.parse(text.slice(SENTINEL.length)) as ClipboardPayload;
+    if (Array.isArray(payload.elements) && Array.isArray(payload.connectors)) return payload;
+  } catch {
+    // fall through
+  }
+  return null;
+}
+
+export function pastePayload(payload: ClipboardPayload, at?: Point): void {
+  const idMap = new Map<string, string>();
+  for (const el of payload.elements) idMap.set(el.id, newId());
+
+  const els: BoardElement[] = payload.elements.map((el) => {
+    const copy: BoardElement = {
+      ...el,
+      id: idMap.get(el.id)!,
+      frameId: el.frameId ? (idMap.get(el.frameId) ?? null) : null,
+    };
+    if (copy.type === 'comment') {
+      copy.attachedTo = copy.attachedTo ? (idMap.get(copy.attachedTo) ?? null) : null;
+    }
+    return copy;
+  });
+
+  const remapAtt = (att: Attachment): Attachment => {
+    if (att.kind === 'element') {
+      const mapped = idMap.get(att.elementId);
+      return mapped ? { ...att, elementId: mapped } : { ...att };
+    }
+    return { ...att };
+  };
+  const cs: Connector[] = payload.connectors.map((c) => ({
+    ...c,
+    id: newId(),
+    from: remapAtt(c.from),
+    to: remapAtt(c.to),
+  }));
+
+  // position: center at `at`, otherwise offset slightly from the originals
+  let dx = 24;
+  let dy = 24;
+  const bounds = unionRects(els.map((el) => el));
+  if (at && bounds) {
+    dx = at.x - (bounds.x + bounds.width / 2);
+    dy = at.y - (bounds.y + bounds.height / 2);
+  }
+  for (const el of els) {
+    el.x += dx;
+    el.y += dy;
+  }
+  const shiftPt = (att: Attachment): Attachment =>
+    att.kind === 'point' ? { ...att, x: att.x + dx, y: att.y + dy } : att;
+  for (const c of cs) {
+    c.from = shiftPt(c.from);
+    c.to = shiftPt(c.to);
+  }
+
+  board().addMany(els, cs);
+  ui().setSelection(
+    els.map((el) => el.id),
+    cs.map((c) => c.id),
+  );
+}
+
+export function pasteInternal(at?: Point): boolean {
+  if (!internalClipboard) return false;
+  pastePayload(internalClipboard, at);
+  return true;
+}
+
+export function duplicateSelection(): void {
+  const payload = collectPayload();
+  if (!payload) return;
+  pastePayload(payload);
+}
+
+// ---------------------------------------------------------------------------
+// View helpers
+
+export function zoomToFit(): void {
+  const { elements, order } = board();
+  const bounds = unionRects(order.map((id) => elements[id]).filter(Boolean));
+  if (bounds) useViewportStore.getState().fitBounds(bounds);
+}
+
+export function zoomToSelection(): void {
+  const { selection } = ui();
+  const { elements } = board();
+  const bounds = unionRects(
+    selection.map((id) => elements[id]).filter((el): el is BoardElement => Boolean(el)),
+  );
+  if (bounds) useViewportStore.getState().fitBounds(bounds);
+}
+
+export function toggleLockSelection(): void {
+  const { selection } = ui();
+  const { elements } = board();
+  const anyUnlocked = selection.some((id) => elements[id] && !elements[id].locked);
+  const patches: Record<string, { locked: boolean }> = {};
+  for (const id of selection) if (elements[id]) patches[id] = { locked: anyUnlocked };
+  board().updateElements(patches);
+  if (anyUnlocked) ui().clearSelection();
+}
+
+export function unlockAll(): void {
+  const { elements } = board();
+  const patches: Record<string, { locked: boolean }> = {};
+  for (const el of Object.values(elements)) if (el.locked) patches[el.id] = { locked: false };
+  board().updateElements(patches);
+}
