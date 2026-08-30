@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
@@ -6,7 +7,7 @@ import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
 import { getCookieSecret, isLoopback } from './auth';
-import { assetsDir, clientDist, ensureDataDirs, thumbsDir } from './paths';
+import { assetsDir, clientDist, dataDir, ensureDataDirs, thumbsDir } from './paths';
 import { flushAllRooms, registerRealtime } from './realtime';
 import { registerRoutes } from './routes';
 
@@ -75,6 +76,30 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   });
 }
 process.on('beforeExit', flushAllRooms);
+
+// crashes must be diagnosable (crash.log) and must not lose room state
+function logCrash(kind: string, err: unknown): void {
+  const line = `[${new Date().toISOString()}] ${kind}: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`;
+  console.error(line);
+  try {
+    fs.appendFileSync(path.join(dataDir, 'crash.log'), line);
+  } catch {
+    // nothing more we can do
+  }
+  try {
+    flushAllRooms();
+  } catch {
+    // nothing more we can do
+  }
+}
+process.on('uncaughtException', (err) => {
+  logCrash('uncaughtException', err);
+  process.exit(1);
+});
+process.on('unhandledRejection', (err) => {
+  logCrash('unhandledRejection', err);
+  process.exit(1);
+});
 
 const port = Number(process.env.MORPH_PORT ?? 3001);
 // 127.0.0.1 = private to this machine; set MORPH_HOST=0.0.0.0 to let
