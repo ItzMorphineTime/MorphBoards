@@ -1,13 +1,18 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { createWriteStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import archiver from 'archiver';
 import * as unzipper from 'unzipper';
 import type { FastifyInstance } from 'fastify';
-import { type BoardDoc, newId } from '@morphboards/shared';
+import { type BoardDoc, newId, type ShareRole } from '@morphboards/shared';
+import { googleEnabled, issueGuest, readGuest, requireCap, resolveActor } from './auth';
 import * as db from './db';
 import { assetsDir, boardAssetsDir, thumbnailPath, tmpDir } from './paths';
+import { getActiveDoc, kickShare, renameActiveRoom } from './realtime';
+
+const SHARE_ROLES: ShareRole[] = ['viewer', 'commenter', 'editor'];
 
 const MIME_EXT: Record<string, string> = {
   'image/png': 'png',
@@ -64,13 +69,32 @@ function rewriteAssetUrls(doc: BoardDoc, oldId: string, newBoardId: string): Boa
 export function registerRoutes(app: FastifyInstance): void {
   app.get('/api/health', async () => ({ ok: true }));
 
+  // ---------------------------------------------------------------- identity
+
+  app.get('/api/me', async (req) => ({
+    actor: resolveActor(req),
+    googleEnabled: googleEnabled(),
+  }));
+
+  app.post('/api/identity', async (req, reply) => {
+    const body = (req.body ?? {}) as { name?: string };
+    if (typeof body.name !== 'string' || !body.name.trim()) {
+      return reply.code(400).send({ error: 'Missing name' });
+    }
+    const existing = readGuest(req);
+    const identity = issueGuest(reply, body.name, existing?.id);
+    return { ok: true, name: identity.name };
+  });
+
   // ------------------------------------------------------------------ boards
 
-  app.get('/api/boards', async () =>
-    db.listBoards().map((meta) => ({ ...meta, thumbnailUrl: thumbnailUrl(meta.id) })),
-  );
+  app.get('/api/boards', async (req, reply) => {
+    if (!requireCap(req, reply, '*', 'owner')) return reply;
+    return db.listBoards().map((meta) => ({ ...meta, thumbnailUrl: thumbnailUrl(meta.id) }));
+  });
 
-  app.post('/api/boards', async (req) => {
+  app.post('/api/boards', async (req, reply) => {
+    if (!requireCap(req, reply, '*', 'owner')) return reply;
     const body = (req.body ?? {}) as { name?: string };
     const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : 'Untitled board';
     return db.createBoard(name);
@@ -78,13 +102,16 @@ export function registerRoutes(app: FastifyInstance): void {
 
   app.get('/api/boards/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
+    if (!requireCap(req, reply, id, 'owner')) return reply;
     const board = db.getBoard(id);
     if (!board) return reply.code(404).send({ error: 'Board not found' });
-    return board;
+    const live = getActiveDoc(id);
+    return live ? { ...board, doc: live } : board;
   });
 
   app.put('/api/boards/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
+    if (!requireCap(req, reply, id, 'owner')) return reply;
     const body = req.body as { doc?: unknown; thumbnail?: string };
     if (!isValidDoc(body?.doc)) return reply.code(400).send({ error: 'Invalid board doc' });
     const updatedAt = db.saveDoc(id, body.doc);
@@ -95,16 +122,19 @@ export function registerRoutes(app: FastifyInstance): void {
 
   app.patch('/api/boards/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
+    if (!requireCap(req, reply, id, 'owner')) return reply;
     const body = req.body as { name?: string };
     if (typeof body?.name !== 'string' || !body.name.trim()) {
       return reply.code(400).send({ error: 'Missing name' });
     }
     if (!db.renameBoard(id, body.name.trim())) return reply.code(404).send({ error: 'Board not found' });
+    renameActiveRoom(id, body.name.trim());
     return { ok: true };
   });
 
   app.delete('/api/boards/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
+    if (!requireCap(req, reply, id, 'owner')) return reply;
     if (!db.deleteBoard(id)) return reply.code(404).send({ error: 'Board not found' });
     fs.rmSync(boardAssetsDir(id), { recursive: true, force: true });
     fs.rmSync(thumbnailPath(id), { force: true });
@@ -113,6 +143,7 @@ export function registerRoutes(app: FastifyInstance): void {
 
   app.post('/api/boards/:id/duplicate', async (req, reply) => {
     const { id } = req.params as { id: string };
+    if (!requireCap(req, reply, id, 'owner')) return reply;
     const source = db.getBoard(id);
     if (!source) return reply.code(404).send({ error: 'Board not found' });
     const copyId = newId();
@@ -128,6 +159,7 @@ export function registerRoutes(app: FastifyInstance): void {
 
   app.post('/api/boards/:id/assets', async (req, reply) => {
     const { id } = req.params as { id: string };
+    if (!requireCap(req, reply, id, 'editor')) return reply;
     if (!db.boardExists(id)) return reply.code(404).send({ error: 'Board not found' });
     const file = await req.file();
     if (!file) return reply.code(400).send({ error: 'No file uploaded' });
@@ -152,6 +184,7 @@ export function registerRoutes(app: FastifyInstance): void {
    */
   app.post('/api/boards/:id/assets/copy', async (req, reply) => {
     const { id } = req.params as { id: string };
+    if (!requireCap(req, reply, id, 'editor')) return reply;
     if (!db.boardExists(id)) return reply.code(404).send({ error: 'Board not found' });
     const body = (req.body ?? {}) as { sourceUrl?: string };
     const match = /^\/files\/([\w-]+)\/([\w.-]+)$/.exec(body.sourceUrl ?? '');
@@ -169,10 +202,78 @@ export function registerRoutes(app: FastifyInstance): void {
     return { assetId, url: `/files/${id}/${filename}` };
   });
 
+  // ------------------------------------------------------------------ shares
+
+  app.get('/api/boards/:id/shares', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!requireCap(req, reply, id, 'owner')) return reply;
+    return db.listShares(id);
+  });
+
+  app.post('/api/boards/:id/shares', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!requireCap(req, reply, id, 'owner')) return reply;
+    if (!db.boardExists(id)) return reply.code(404).send({ error: 'Board not found' });
+    const body = (req.body ?? {}) as { role?: string };
+    if (!SHARE_ROLES.includes(body.role as ShareRole)) {
+      return reply.code(400).send({ error: 'Invalid role' });
+    }
+    return db.createShare(id, body.role as ShareRole);
+  });
+
+  app.delete('/api/shares/:token', async (req, reply) => {
+    const { token } = req.params as { token: string };
+    const share = db.getShare(token);
+    if (!share) return reply.code(404).send({ error: 'Share not found' });
+    if (!requireCap(req, reply, share.boardId, 'owner')) return reply;
+    db.revokeShare(token);
+    kickShare(token);
+    return { ok: true };
+  });
+
+  /** Guest entry point: resolve a share link to board meta + role (+ doc fallback). */
+  app.get('/api/shared/:token', async (req, reply) => {
+    const { token } = req.params as { token: string };
+    const share = db.getShare(token);
+    if (!share || share.revokedAt !== null) {
+      return reply.code(404).send({ error: 'This share link is invalid or was revoked' });
+    }
+    const board = db.getBoard(share.boardId);
+    if (!board) return reply.code(404).send({ error: 'Board not found' });
+    const live = getActiveDoc(share.boardId);
+    return {
+      board: { id: board.id, name: board.name },
+      role: share.role,
+      doc: live ?? board.doc,
+    };
+  });
+
+  /** LAN addresses for building copyable share links in local mode. */
+  app.get('/api/server-info', async (req, reply) => {
+    if (!requireCap(req, reply, '*', 'owner')) return reply;
+    const hosts: string[] = [];
+    for (const infos of Object.values(os.networkInterfaces())) {
+      for (const info of infos ?? []) {
+        if (info.family === 'IPv4' && !info.internal) hosts.push(info.address);
+      }
+    }
+    const port = Number(process.env.MORPH_PORT ?? 3001);
+    return { port, hosts, bound: process.env.MORPH_HOST ?? '127.0.0.1' };
+  });
+
+  app.post('/api/boards/:id/thumbnail', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    if (!requireCap(req, reply, id, 'editor')) return reply;
+    const body = (req.body ?? {}) as { dataUrl?: string };
+    if (typeof body.dataUrl === 'string') writeThumbnail(id, body.dataUrl);
+    return { ok: true };
+  });
+
   // ----------------------------------------------------------- export/import
 
   app.get('/api/boards/:id/export', async (req, reply) => {
     const { id } = req.params as { id: string };
+    if (!requireCap(req, reply, id, 'editor')) return reply;
     const board = db.getBoard(id);
     if (!board) return reply.code(404).send({ error: 'Board not found' });
 
@@ -193,6 +294,7 @@ export function registerRoutes(app: FastifyInstance): void {
   });
 
   app.post('/api/import', async (req, reply) => {
+    if (!requireCap(req, reply, '*', 'owner')) return reply;
     const file = await req.file();
     if (!file) return reply.code(400).send({ error: 'No file uploaded' });
 

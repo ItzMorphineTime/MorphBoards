@@ -1,8 +1,13 @@
 import fs from 'node:fs';
 import Fastify from 'fastify';
+import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
+import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
+import websocket from '@fastify/websocket';
+import { getCookieSecret, isLoopback } from './auth';
 import { assetsDir, clientDist, ensureDataDirs, thumbsDir } from './paths';
+import { flushAllRooms, registerRealtime } from './realtime';
 import { registerRoutes } from './routes';
 
 ensureDataDirs();
@@ -10,6 +15,20 @@ ensureDataDirs();
 const app = Fastify({
   logger: false,
   bodyLimit: 64 * 1024 * 1024, // board docs + thumbnail dataURLs
+  trustProxy: process.env.MORPH_TRUST_PROXY === '1',
+});
+
+await app.register(cookie, { secret: getCookieSecret() });
+
+await app.register(rateLimit, {
+  global: true,
+  max: 600,
+  timeWindow: '1 minute',
+  allowList: (req) => isLoopback(req),
+});
+
+await app.register(websocket, {
+  options: { maxPayload: 4 * 1024 * 1024 },
 });
 
 await app.register(multipart, {
@@ -40,6 +59,7 @@ if (fs.existsSync(clientDist)) {
   });
 }
 
+registerRealtime(app);
 registerRoutes(app);
 
 app.setErrorHandler((err: Error & { statusCode?: number }, _req, reply) => {
@@ -47,10 +67,22 @@ app.setErrorHandler((err: Error & { statusCode?: number }, _req, reply) => {
   reply.code(err.statusCode ?? 500).send({ error: err.message ?? 'Internal error' });
 });
 
+// never lose in-memory room state on shutdown
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, () => {
+    flushAllRooms();
+    process.exit(0);
+  });
+}
+process.on('beforeExit', flushAllRooms);
+
 const port = Number(process.env.MORPH_PORT ?? 3001);
+// 127.0.0.1 = private to this machine; set MORPH_HOST=0.0.0.0 to let
+// share links work for other devices (LAN) or a hosted deployment.
+const host = process.env.MORPH_HOST ?? '127.0.0.1';
 try {
-  await app.listen({ port, host: '127.0.0.1' });
-  console.log(`MorphBoards server running at http://127.0.0.1:${port}`);
+  await app.listen({ port, host });
+  console.log(`MorphBoards server running at http://${host}:${port}`);
 } catch (err) {
   console.error(err);
   process.exit(1);

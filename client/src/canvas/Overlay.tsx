@@ -12,6 +12,7 @@ import { useBoardStore } from '../state/boardStore';
 import { useUiStore } from '../state/uiStore';
 import { useViewportStore } from '../state/viewportStore';
 import { CommentPopover } from '../components/CommentPopover';
+import { PresenceLayer } from './PresenceLayer';
 
 const HANDLE_CURSOR: Record<HandleDir, string> = {
   nw: 'nwse-resize',
@@ -166,6 +167,7 @@ export function Overlay() {
           );
         })}
 
+      <PresenceLayer />
       <ConnectorLabelEditor />
       <CommentPopover />
     </div>

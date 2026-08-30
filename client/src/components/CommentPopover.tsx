@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { newId } from '@morphboards/shared';
 import { worldToScreen } from '../geometry/geo';
 import { useBoardStore } from '../state/boardStore';
+import { useCanComment, useSessionStore } from '../state/sessionStore';
 import { useUiStore } from '../state/uiStore';
 import { useViewportStore } from '../state/viewportStore';
 
@@ -20,6 +21,8 @@ export function CommentPopover() {
   const vp = useViewportStore();
   const [text, setText] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
+  const commentable = useCanComment();
+  const actor = useSessionStore((s) => s.actor);
 
   useEffect(() => {
     setText('');
@@ -39,8 +42,11 @@ export function CommentPopover() {
   const submit = () => {
     const trimmed = text.trim();
     if (!trimmed) return;
+    const author = actor ? { id: actor.id, name: actor.name } : undefined;
     useBoardStore.getState().updateElements({
-      [id]: { messages: [...el.messages, { id: newId(), text: trimmed, createdAt: Date.now() }] },
+      [id]: {
+        messages: [...el.messages, { id: newId(), text: trimmed, createdAt: Date.now(), author }],
+      },
     });
     setText('');
   };
@@ -66,7 +72,8 @@ export function CommentPopover() {
       <div className="comment-popover-header">
         <span className="comment-popover-title">{el.resolved ? 'Resolved' : 'Comment'}</span>
         <div className="comment-popover-actions">
-          <button className="ghost-btn" title={el.resolved ? 'Reopen' : 'Resolve'} onClick={toggleResolved}>
+          {commentable && (
+            <button className="ghost-btn" title={el.resolved ? 'Reopen' : 'Resolve'} onClick={toggleResolved}>
             {el.resolved ? (
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M3 12a9 9 0 1 0 9-9M3 3v6h6" />
@@ -77,11 +84,14 @@ export function CommentPopover() {
               </svg>
             )}
           </button>
+          )}
+          {commentable && (
           <button className="ghost-btn" title="Delete comment" onClick={remove}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M4 7h16M10 7V5h4v2m-7 0 1 13h8l1-13" />
             </svg>
           </button>
+          )}
           <button className="ghost-btn" title="Close" onClick={() => useUiStore.setState({ openCommentId: null })}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
               <path d="M6 6l12 12M18 6 6 18" />
@@ -94,29 +104,34 @@ export function CommentPopover() {
         {el.messages.map((m) => (
           <div key={m.id} className="comment-message">
             <div className="comment-message-text">{m.text}</div>
-            <div className="comment-message-time">{formatTime(m.createdAt)}</div>
+            <div className="comment-message-time">
+              {m.author?.name ? `${m.author.name} · ` : ''}
+              {formatTime(m.createdAt)}
+            </div>
           </div>
         ))}
       </div>
-      <div className="comment-compose">
-        <textarea
-          value={text}
-          autoFocus
-          rows={2}
-          placeholder="Write a comment…"
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            e.stopPropagation();
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-        />
-        <button className="primary-btn" onClick={submit} disabled={!text.trim()}>
-          Post
-        </button>
-      </div>
+      {commentable && (
+        <div className="comment-compose">
+          <textarea
+            value={text}
+            autoFocus
+            rows={2}
+            placeholder="Write a comment…"
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+          />
+          <button className="primary-btn" onClick={submit} disabled={!text.trim()}>
+            Post
+          </button>
+        </div>
+      )}
     </div>
   );
 }

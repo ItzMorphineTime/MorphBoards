@@ -6,6 +6,7 @@ import {
 } from '@morphboards/shared';
 import { type Point, rectContainsPoint, unionRects } from '../geometry/geo';
 import { useBoardStore } from '../state/boardStore';
+import { canComment, canEdit } from '../state/sessionStore';
 import { useUiStore } from '../state/uiStore';
 import { useViewportStore } from '../state/viewportStore';
 
@@ -79,6 +80,16 @@ export function carriedPointPatches(
 export function deleteSelection(): void {
   const { selection, selectedConnectors } = ui();
   if (selection.length === 0 && selectedConnectors.length === 0) return;
+  if (!canEdit()) {
+    // commenters may only delete comment pins
+    if (!canComment()) return;
+    const { elements } = board();
+    const commentIds = selection.filter((id) => elements[id]?.type === 'comment');
+    if (commentIds.length === 0) return;
+    board().removeMixed(commentIds, []);
+    ui().clearSelection();
+    return;
+  }
   board().removeMixed(selection, selectedConnectors);
   ui().clearSelection();
 }
@@ -177,6 +188,7 @@ async function writeImageClipboard(sentinel: string, assetUrl: string): Promise<
 }
 
 export function cutSelection(): void {
+  if (!canEdit()) return;
   copySelection();
   deleteSelection();
 }
@@ -193,6 +205,7 @@ export function parseClipboardText(text: string): ClipboardPayload | null {
 }
 
 export function pastePayload(payload: ClipboardPayload, at?: Point): BoardElement[] {
+  if (!canEdit()) return [];
   const idMap = new Map<string, string>();
   for (const el of payload.elements) idMap.set(el.id, newId());
 
@@ -255,6 +268,7 @@ export function pasteInternal(at?: Point): BoardElement[] | null {
 }
 
 export function duplicateSelection(): void {
+  if (!canEdit()) return;
   const payload = collectPayload();
   if (!payload) return;
   pastePayload(payload);

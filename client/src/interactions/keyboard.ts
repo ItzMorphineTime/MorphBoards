@@ -1,4 +1,5 @@
 import { useBoardStore, type ElementPatch } from '../state/boardStore';
+import { canComment, canEdit } from '../state/sessionStore';
 import { useUiStore, type Tool } from '../state/uiStore';
 import { useViewportStore } from '../state/viewportStore';
 import {
@@ -31,6 +32,7 @@ const TOOL_KEYS: Record<string, Tool> = {
 };
 
 function nudgeSelection(dx: number, dy: number): void {
+  if (!canEdit()) return;
   const ids = moveClosure(ui().selection);
   if (ids.size === 0) return;
   const { elements } = board();
@@ -101,11 +103,13 @@ export function installKeyboard(): () => void {
       switch (key.toLowerCase()) {
         case 'z':
           e.preventDefault();
+          if (!canComment()) return;
           if (e.shiftKey) board().redo();
           else board().undo();
           return;
         case 'y':
           e.preventDefault();
+          if (!canComment()) return;
           board().redo();
           return;
         case 'a':
@@ -137,11 +141,11 @@ export function installKeyboard(): () => void {
           return;
         case '[':
           e.preventDefault();
-          board().reorder(ui().selection, e.shiftKey ? 'back' : 'backward');
+          if (canEdit()) board().reorder(ui().selection, e.shiftKey ? 'back' : 'backward');
           return;
         case ']':
           e.preventDefault();
-          board().reorder(ui().selection, e.shiftKey ? 'front' : 'forward');
+          if (canEdit()) board().reorder(ui().selection, e.shiftKey ? 'front' : 'forward');
           return;
         default:
           return;
@@ -182,7 +186,11 @@ export function installKeyboard(): () => void {
     }
 
     const tool = TOOL_KEYS[key.toLowerCase()];
-    if (tool && !e.altKey) ui().setTool(tool);
+    if (tool && !e.altKey) {
+      if (!canEdit() && tool !== 'select' && tool !== 'pan' && tool !== 'comment') return;
+      if (tool === 'comment' && !canComment()) return;
+      ui().setTool(tool);
+    }
   };
 
   const onKeyUp = (e: KeyboardEvent) => {

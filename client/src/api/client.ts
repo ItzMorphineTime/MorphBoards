@@ -1,13 +1,27 @@
 import type {
+  ActorInfo,
   AssetUploadResult,
   BoardDoc,
   BoardListItem,
   BoardMeta,
   BoardWithDoc,
+  ShareInfo,
+  ShareRole,
 } from '@morphboards/shared';
 
+/** Share token attached to every API call in a guest session. */
+let apiShareToken: string | null = null;
+
+export function setApiShareToken(token: string | null): void {
+  apiShareToken = token;
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init);
+  const headers = {
+    ...((init?.headers as Record<string, string>) ?? {}),
+    ...(apiShareToken ? { 'x-share-token': apiShareToken } : {}),
+  };
+  const res = await fetch(url, { ...init, headers });
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`;
     try {
@@ -58,5 +72,24 @@ export const api = {
     form.append('file', file, file.name);
     return request<BoardMeta>('/api/import', { method: 'POST', body: form });
   },
-  exportUrl: (id: string) => `/api/boards/${id}/export`,
+  exportUrl: (id: string) =>
+    `/api/boards/${id}/export${apiShareToken ? `?share=${apiShareToken}` : ''}`,
+
+  // sharing & identity
+  me: () => request<{ actor: ActorInfo | null; googleEnabled: boolean }>('/api/me'),
+  setIdentity: (name: string) =>
+    request<{ ok: true; name: string }>('/api/identity', jsonInit('POST', { name })),
+  getShared: (token: string) =>
+    request<{ board: { id: string; name: string }; role: ShareRole; doc: BoardDoc }>(
+      `/api/shared/${token}`,
+    ),
+  listShares: (boardId: string) => request<ShareInfo[]>(`/api/boards/${boardId}/shares`),
+  createShare: (boardId: string, role: ShareRole) =>
+    request<ShareInfo>(`/api/boards/${boardId}/shares`, jsonInit('POST', { role })),
+  revokeShare: (token: string) =>
+    request<{ ok: true }>(`/api/shares/${token}`, { method: 'DELETE' }),
+  serverInfo: () =>
+    request<{ port: number; hosts: string[]; bound: string }>('/api/server-info'),
+  postThumbnail: (boardId: string, dataUrl: string) =>
+    request<{ ok: true }>(`/api/boards/${boardId}/thumbnail`, jsonInit('POST', { dataUrl })),
 };

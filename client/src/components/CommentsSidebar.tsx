@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { CommentElement } from '@morphboards/shared';
 import { useBoardStore } from '../state/boardStore';
+import { useCanComment } from '../state/sessionStore';
 import { useUiStore } from '../state/uiStore';
 import { useViewportStore } from '../state/viewportStore';
 import { formatTime } from './CommentPopover';
@@ -20,6 +21,7 @@ export function CommentsSidebar() {
   const open = useUiStore((s) => s.commentsSidebarOpen);
   const elements = useBoardStore((s) => s.elements);
   const [showResolved, setShowResolved] = useState(false);
+  const commentable = useCanComment();
   if (!open) return null;
 
   const pins = Object.values(elements)
@@ -77,16 +79,18 @@ export function CommentsSidebar() {
                   {el.messages.length} message{el.messages.length === 1 ? '' : 's'}
                   {last ? ` · ${formatTime(last.createdAt)}` : ''}
                 </span>
-                <button
-                  className={`ghost-btn small ${el.resolved ? 'active' : ''}`}
-                  title={el.resolved ? 'Reopen' : 'Resolve'}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    useBoardStore.getState().updateElements({ [el.id]: { resolved: !el.resolved } });
-                  }}
-                >
-                  {Icons.check({ size: 13 })}
-                </button>
+                {commentable && (
+                  <button
+                    className={`ghost-btn small ${el.resolved ? 'active' : ''}`}
+                    title={el.resolved ? 'Reopen' : 'Resolve'}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      useBoardStore.getState().updateElements({ [el.id]: { resolved: !el.resolved } });
+                    }}
+                  >
+                    {Icons.check({ size: 13 })}
+                  </button>
+                )}
               </div>
             </div>
           );

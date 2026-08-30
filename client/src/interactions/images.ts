@@ -4,6 +4,7 @@ import { makeImage, makeLink, makeText } from '../defaults';
 import { type Point, rectCenter } from '../geometry/geo';
 import { frameAt } from '../geometry/hitTest';
 import { useBoardStore, type ElementPatch } from '../state/boardStore';
+import { canEdit } from '../state/sessionStore';
 import { useUiStore } from '../state/uiStore';
 import { parseClipboardText, pasteInternal, pastePayload } from './actions';
 import { lastPointerWorld, worldPoint } from './interactions';
@@ -38,7 +39,7 @@ function adoptFramePatch(el: BoardElement): ElementPatch | null {
 
 export async function uploadImageFiles(files: File[], atWorld: Point): Promise<void> {
   const boardId = board().boardId;
-  if (!boardId || files.length === 0) return;
+  if (!boardId || files.length === 0 || !canEdit()) return;
 
   const results = await Promise.all(
     files.map(async (file) => {
@@ -140,6 +141,7 @@ function handleTextContent(text: string, at: Point): void {
  * in-memory clipboard when clipboard access is blocked.
  */
 export async function pasteAt(at: Point): Promise<void> {
+  if (!canEdit()) return;
   try {
     const items = await navigator.clipboard.read();
     // our own copies carry the sentinel — prefer internal paste over re-upload
@@ -193,6 +195,7 @@ export function handleCanvasDragOver(e: React.DragEvent): void {
 
 export function handleCanvasDrop(e: React.DragEvent): void {
   e.preventDefault();
+  if (!canEdit()) return;
   const at = worldPoint(e);
   const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith('image/'));
   if (files.length > 0) {
@@ -215,6 +218,7 @@ export function handlePaste(e: ClipboardEvent): void {
   ) {
     return;
   }
+  if (!canEdit()) return;
   const data = e.clipboardData;
   if (!data) return;
 

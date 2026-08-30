@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import type { ShapeKind } from '@morphboards/shared';
 import { uploadImageFiles } from '../interactions/images';
+import { useCanComment, useCanEdit } from '../state/sessionStore';
 import { screenToWorldPt, useViewportStore } from '../state/viewportStore';
 import { useUiStore, type Tool } from '../state/uiStore';
 import { Icons } from './icons';
@@ -43,6 +44,8 @@ export function Toolbar() {
   const setShapeKind = useUiStore((s) => s.setShapeKind);
   const [shapeMenuOpen, setShapeMenuOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const editable = useCanEdit();
+  const commentable = useCanComment();
 
   const toolButton = (def: ToolDef) => (
     <button
@@ -57,6 +60,13 @@ export function Toolbar() {
       {def.icon({ size: 19 })}
     </button>
   );
+
+  if (!editable) {
+    // viewers get navigation only; commenters also get the comment tool
+    const guestTools = TOOLS.filter((t) => t.tool === 'select' || t.tool === 'pan');
+    if (commentable) guestTools.push(TOOLS_AFTER_SHAPE.find((t) => t.tool === 'comment')!);
+    return <div className="toolbar">{guestTools.map(toolButton)}</div>;
+  }
 
   return (
     <div className="toolbar">

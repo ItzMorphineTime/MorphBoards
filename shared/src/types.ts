@@ -98,6 +98,7 @@ export interface CommentMessage {
   id: string;
   text: string;
   createdAt: number; // epoch ms
+  author?: { id: string; name: string };
 }
 
 export interface CommentElement extends ElementBase {
@@ -175,4 +176,59 @@ export interface BoardWithDoc extends BoardMeta {
 export interface AssetUploadResult {
   assetId: string;
   url: string;
+}
+
+// ---------------------------------------------------------------------------
+// Sharing & collaboration
+
+export type ShareRole = 'viewer' | 'commenter' | 'editor';
+/** What a connection may do with a board. */
+export type Capability = ShareRole | 'owner';
+
+export interface ShareInfo {
+  token: string;
+  boardId: string;
+  role: ShareRole;
+  createdAt: number;
+  revokedAt: number | null;
+}
+
+export interface ActorInfo {
+  /** Stable identity: 'owner', 'user:<id>' or 'guest:<id>'. */
+  id: string;
+  kind: 'owner' | 'user' | 'guest';
+  name: string;
+  color: string;
+}
+
+export interface PeerInfo {
+  /** Connection id (one actor can have several tabs). */
+  peerId: string;
+  actorId: string;
+  name: string;
+  color: string;
+  role: Capability;
+}
+
+/** Comment authorship (denormalized so history survives renames). */
+export interface CommentAuthor {
+  id: string;
+  name: string;
+}
+
+export const ACTOR_COLORS = [
+  '#4f8cff',
+  '#ff8a65',
+  '#ba68c8',
+  '#4db6ac',
+  '#f06292',
+  '#aed581',
+  '#ffd54f',
+  '#7986cb',
+];
+
+export function colorForActor(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return ACTOR_COLORS[h % ACTOR_COLORS.length];
 }

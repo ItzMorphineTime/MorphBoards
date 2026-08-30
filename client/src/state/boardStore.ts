@@ -1,25 +1,36 @@
 import { create } from 'zustand';
 import {
+  applyOpToDoc,
   type BoardDoc,
   type BoardElement,
+  type BoardOp,
   type BoardWithDoc,
   type Connector,
+  type ConnectorDiff,
+  type DocDiff,
+  type ElementDiff,
+  invertDiff,
   SCHEMA_VERSION,
 } from '@morphboards/shared';
 
-export interface ElementDiff {
-  before: BoardElement | null;
-  after: BoardElement | null;
-}
-export interface ConnectorDiff {
-  before: Connector | null;
-  after: Connector | null;
-}
+export type { ConnectorDiff, ElementDiff };
 
-export interface HistoryEntry {
-  elements?: Record<string, ElementDiff>;
-  connectors?: Record<string, ConnectorDiff>;
-  order?: { before: string[]; after: string[] };
+/** Local undo entries share the wire diff shape. */
+export type HistoryEntry = DocDiff;
+
+// ---------------------------------------------------------------------------
+// Collaboration hooks (wired up by api/realtime.ts when a live session exists)
+
+let opEmitter: ((diff: DocDiff) => void) | null = null;
+let previewEmitter:
+  | ((elementPatches?: Record<string, ElementPatch>, connectorPatches?: Record<string, ConnectorPatch>) => void)
+  | null = null;
+
+export function setOpEmitter(fn: typeof opEmitter): void {
+  opEmitter = fn;
+}
+export function setPreviewEmitter(fn: typeof previewEmitter): void {
+  previewEmitter = fn;
 }
 
 const HISTORY_LIMIT = 100;
@@ -78,6 +89,14 @@ interface BoardStore {
 
   undo(): void;
   redo(): void;
+
+  /** Apply an op from another client: no history entry, no dirty bump. */
+  applyRemoteOp(op: BoardOp, orderEcho?: string[]): void;
+  /** Apply another client's live drag preview (ephemeral, no history/dirty). */
+  applyPreviewPatches(
+    elementPatches?: Record<string, ElementPatch>,
+    connectorPatches?: Record<string, ConnectorPatch>,
+  ): void;
 }
 
 let session: TransientSession | null = null;
@@ -89,6 +108,7 @@ function mergeElement(prev: BoardElement, patch: ElementPatch): BoardElement {
 export const useBoardStore = create<BoardStore>()((set, get) => {
   function commitEntry(entry: HistoryEntry): void {
     if (!entry.elements && !entry.connectors && !entry.order) return;
+    opEmitter?.(entry);
     set((s) => {
       const elements = { ...s.elements };
       if (entry.elements) {
@@ -401,6 +421,7 @@ export const useBoardStore = create<BoardStore>()((set, get) => {
         }
         return next;
       });
+      previewEmitter?.(elementPatches, connectorPatches);
     },
 
     endTransient: (extraElementPatches) => {
@@ -423,6 +444,7 @@ export const useBoardStore = create<BoardStore>()((set, get) => {
       ) {
         return;
       }
+      opEmitter?.(entry);
       // state already holds the "after" values; push entry without re-applying
       set((st) => ({
         undoStack: [...st.undoStack, entry].slice(-HISTORY_LIMIT),
@@ -454,6 +476,7 @@ export const useBoardStore = create<BoardStore>()((set, get) => {
       if (!entry) return;
       set({ undoStack: s.undoStack.slice(0, -1), redoStack: [...s.redoStack, entry] });
       applyEntry(entry, 'before');
+      opEmitter?.(invertDiff(entry));
     },
 
     redo: () => {
@@ -462,6 +485,43 @@ export const useBoardStore = create<BoardStore>()((set, get) => {
       if (!entry) return;
       set({ redoStack: s.redoStack.slice(0, -1), undoStack: [...s.undoStack, entry] });
       applyEntry(entry, 'after');
+      opEmitter?.(entry);
+    },
+
+    applyRemoteOp: (op, orderEcho) => {
+      set((s) => {
+        const doc = {
+          elements: { ...s.elements },
+          connectors: { ...s.connectors },
+          order: [...s.order],
+        };
+        applyOpToDoc(doc, op);
+        if (orderEcho) doc.order = [...orderEcho];
+        return { elements: doc.elements, connectors: doc.connectors, order: doc.order };
+      });
+    },
+
+    applyPreviewPatches: (elementPatches, connectorPatches) => {
+      set((s) => {
+        const next: Partial<BoardStore> = {};
+        if (elementPatches) {
+          const elements = { ...s.elements };
+          for (const [id, patch] of Object.entries(elementPatches)) {
+            const prev = elements[id];
+            if (prev) elements[id] = mergeElement(prev, patch);
+          }
+          next.elements = elements;
+        }
+        if (connectorPatches) {
+          const connectors = { ...s.connectors };
+          for (const [id, patch] of Object.entries(connectorPatches)) {
+            const prev = connectors[id];
+            if (prev) connectors[id] = { ...prev, ...patch };
+          }
+          next.connectors = connectors;
+        }
+        return next;
+      });
     },
   };
 });

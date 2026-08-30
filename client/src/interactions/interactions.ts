@@ -24,6 +24,7 @@ import { elementsInRect, frameAt, topElementAt } from '../geometry/hitTest';
 import { scaleChildWithFrame, fontScaleFor } from '../geometry/frameMath';
 import { computeResizedBox, type HandleDir, isCorner } from '../geometry/resizeBox';
 import { frameCount, useBoardStore, type ElementPatch } from '../state/boardStore';
+import { canComment, canEdit } from '../state/sessionStore';
 import { useUiStore } from '../state/uiStore';
 import { screenToWorldPt, useViewportStore } from '../state/viewportStore';
 import {
@@ -138,6 +139,13 @@ function beginMoveDrag(e: React.PointerEvent, grabbedId: string, onPlainClick?: 
   let closure = moveClosure(selectionIds);
   if (closure.size === 0) return;
 
+  if (!canEdit()) {
+    // commenters may only drag comment pins
+    const { elements } = board();
+    const allComments = Array.from(closure).every((id) => elements[id]?.type === 'comment');
+    if (!canComment() || !allComments) return;
+  }
+
   let started = false;
   let startPositions: Record<string, Point> = {};
   let carried: CarriedPoint[] = [];
@@ -222,6 +230,7 @@ function beginMoveDrag(e: React.PointerEvent, grabbedId: string, onPlainClick?: 
 export function handleResizeHandleDown(e: React.PointerEvent, dir: HandleDir): void {
   e.stopPropagation();
   e.preventDefault();
+  if (!canEdit()) return;
   const { elements } = board();
   const selectionIds = ui().selection.filter((id) => elements[id] && !elements[id].locked);
   const els = selectionIds.map((id) => elements[id]);
@@ -490,6 +499,7 @@ function beginDrawConnector(
 export function handlePortPointerDown(e: React.PointerEvent, elementId: string, side: Side): void {
   e.stopPropagation();
   e.preventDefault();
+  if (!canEdit()) return;
   beginDrawConnector(e, { kind: 'element', elementId, side }, { arrowEnd: true });
 }
 
@@ -500,6 +510,7 @@ export function handleConnectorEndpointDown(
 ): void {
   e.stopPropagation();
   e.preventDefault();
+  if (!canEdit()) return;
   board().beginTransient([], [id]);
   startPointerSession({
     onMove: (ev) => {
@@ -530,7 +541,7 @@ export function handleConnectorEndpointDown(
 
 /** Drag a fully-detached connector (a plain line) to translate it. */
 export function handleConnectorPointerDown(e: React.PointerEvent, id: string): void {
-  if (ui().tool !== 'select') return;
+  if (ui().tool !== 'select' || !canEdit()) return;
   e.stopPropagation();
   if (e.button === 1 || ui().spaceDown) {
     beginPan(e);
@@ -623,6 +634,10 @@ export function handleElementDoubleClick(e: React.MouseEvent, id: string): void 
   e.stopPropagation();
   const el = board().elements[id];
   if (!el || el.locked) return;
+  if (!canEdit()) {
+    if (el.type === 'comment') uiSet({ openCommentId: id });
+    return;
+  }
   switch (el.type) {
     case 'sticky':
     case 'text':
@@ -652,6 +667,10 @@ export function handleCanvasPointerDown(e: React.PointerEvent): void {
   const tool = ui().tool;
   const pt = worldPoint(e);
   const s = board();
+
+  // capability gate: non-editors get selection/pan (and comments if allowed)
+  if (!canEdit() && tool !== 'select' && tool !== 'pan' && tool !== 'comment') return;
+  if (tool === 'comment' && !canComment()) return;
 
   switch (tool) {
     case 'select':
@@ -710,6 +729,7 @@ export function handleCanvasPointerDown(e: React.PointerEvent): void {
 
 export function handleCanvasContextMenu(e: React.MouseEvent): void {
   e.preventDefault();
+  if (!canEdit()) return;
   const { selection, selectedConnectors } = ui();
   const pt = worldPoint(e);
   uiSet({

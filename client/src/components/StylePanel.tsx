@@ -8,6 +8,7 @@ import {
 import { clamp } from '../geometry/geo';
 import { deleteSelection, toggleLockSelection } from '../interactions/actions';
 import { useBoardStore, type ElementPatch } from '../state/boardStore';
+import { useCanEdit } from '../state/sessionStore';
 import { useUiStore } from '../state/uiStore';
 import { ColorField } from './ColorField';
 import { Icons } from './icons';
@@ -77,6 +78,8 @@ export function StylePanel() {
   const selectedConnectors = useUiStore((s) => s.selectedConnectors);
   const elements = useBoardStore((s) => s.elements);
   const connectors = useBoardStore((s) => s.connectors);
+  const editable = useCanEdit();
+  if (!editable) return null;
 
   const els = selection
     .map((id) => elements[id])

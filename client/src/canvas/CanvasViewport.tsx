@@ -1,7 +1,9 @@
 import { useEffect, useRef } from 'react';
+import { reportCursor } from '../api/realtime';
 import {
   handleCanvasContextMenu,
   handleCanvasPointerDown,
+  lastPointerWorld,
   setCanvasEl,
   trackPointer,
 } from '../interactions/interactions';
@@ -110,7 +112,10 @@ export function CanvasViewport() {
       className="canvas-root"
       style={{ cursor }}
       onPointerDown={handleCanvasPointerDown}
-      onPointerMove={trackPointer}
+      onPointerMove={(e) => {
+        trackPointer(e);
+        reportCursor(lastPointerWorld);
+      }}
       onContextMenu={handleCanvasContextMenu}
       onDragOver={handleCanvasDragOver}
       onDrop={handleCanvasDrop}
