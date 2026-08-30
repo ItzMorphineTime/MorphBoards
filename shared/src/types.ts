@@ -66,6 +66,8 @@ export interface StickyElement extends ElementBase {
   /** CSS background color (from the sticky palette). */
   color: string;
   text: string;
+  /** Explicit text size; null/undefined = auto-scale with the sticky's width. */
+  fontSize?: number | null;
 }
 
 export interface ImageElement extends ElementBase {
@@ -82,6 +84,8 @@ export interface LinkElement extends ElementBase {
   url: string;
   title: string;
   description?: string;
+  /** Title text size; undefined = default card size. */
+  fontSize?: number;
 }
 
 export interface FrameElement extends ElementBase {

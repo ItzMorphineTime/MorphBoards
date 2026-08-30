@@ -65,6 +65,7 @@ export function ShapeView({ el, editing }: ViewProps<ShapeElement>) {
           <EditableText
             value={el.text}
             editing={editing}
+            ownerId={el.id}
             style={textCss(el.textStyle)}
             onCommit={(text) => commitText(el.id, { text })}
           />
@@ -93,6 +94,7 @@ export function TextView({ el, editing }: ViewProps<TextElement>) {
       <EditableText
         value={el.text}
         editing={editing}
+        ownerId={el.id}
         style={textCss(el.textStyle)}
         placeholder="Type something"
         onCommit={(text) => commitText(el.id, { text })}
@@ -104,12 +106,13 @@ export function TextView({ el, editing }: ViewProps<TextElement>) {
 // ---------------------------------------------------------------------------
 
 export function StickyView({ el, editing }: ViewProps<StickyElement>) {
-  const fontSize = clamp((el.width / 180) * 20, 6, 120);
+  const fontSize = el.fontSize ?? clamp((el.width / 180) * 20, 6, 120);
   return (
     <div className="sticky-view" style={{ background: el.color }}>
       <EditableText
         value={el.text}
         editing={editing}
+        ownerId={el.id}
         style={{ fontSize, color: '#1f2329', textAlign: 'center', fontWeight: 500, lineHeight: 1.35 }}
         onCommit={(text) => commitText(el.id, { text })}
       />
@@ -148,6 +151,7 @@ export function LinkView({ el, editing }: ViewProps<LinkElement>) {
   } catch {
     // show raw url
   }
+  const titleSize = el.fontSize ?? 13.5;
   return (
     <div className="link-card">
       <div className="link-avatar">{(el.title || hostname).charAt(0).toUpperCase()}</div>
@@ -155,10 +159,14 @@ export function LinkView({ el, editing }: ViewProps<LinkElement>) {
         <EditableText
           value={el.title}
           editing={editing}
+          ownerId={el.id}
           className="link-title"
+          style={{ fontSize: titleSize }}
           onCommit={(title) => commitText(el.id, { title })}
         />
-        <div className="link-url">{hostname}</div>
+        <div className="link-url" style={{ fontSize: Math.max(10, Math.round(titleSize * 0.88)) }}>
+          {hostname}
+        </div>
       </div>
       <a
         className="link-open"
@@ -186,6 +194,7 @@ export function FrameView({ el, editing }: ViewProps<FrameElement>) {
         <EditableText
           value={el.title}
           editing={editing}
+          ownerId={el.id}
           selectAllOnFocus
           onCommit={(title) => commitText(el.id, { title: title.trim() || el.title })}
         />

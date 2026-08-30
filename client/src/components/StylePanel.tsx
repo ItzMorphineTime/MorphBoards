@@ -5,6 +5,7 @@ import {
   STROKE_COLORS,
   TEXT_COLORS,
 } from '../defaults';
+import { clamp } from '../geometry/geo';
 import { deleteSelection, toggleLockSelection } from '../interactions/actions';
 import { useBoardStore, type ElementPatch } from '../state/boardStore';
 import { useUiStore } from '../state/uiStore';
@@ -13,6 +14,25 @@ import { Icons } from './icons';
 
 const FILL_PRESETS = ELEMENT_COLORS.filter((c) => c !== 'transparent');
 const STROKE_PRESETS = STROKE_COLORS.filter((c) => c !== 'transparent');
+
+/** Current text size of any text-bearing element (auto sizes resolved). */
+function effectiveFontSize(el: BoardElement): number {
+  switch (el.type) {
+    case 'text':
+    case 'shape':
+      return el.textStyle.fontSize;
+    case 'sticky':
+      return el.fontSize ?? clamp((el.width / 180) * 20, 6, 120);
+    case 'link':
+      return el.fontSize ?? 13.5;
+    default:
+      return 0;
+  }
+}
+
+function isSizable(el: BoardElement): boolean {
+  return el.type === 'text' || el.type === 'shape' || el.type === 'sticky' || el.type === 'link';
+}
 
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -98,8 +118,72 @@ export function StylePanel() {
   const anyLocked = els.some((el) => el.locked);
   const conIds = cons.map((c) => c.id);
 
+  const sizables = els.filter(isSizable);
+  const allStickiesAuto = stickies.every((el) => el.type === 'sticky' && el.fontSize == null);
+  const scaleFonts = (factor: number) => {
+    const patches: Record<string, ElementPatch> = {};
+    for (const el of sizables) {
+      const next = clamp(Math.round(effectiveFontSize(el) * factor), 6, 400);
+      if (el.type === 'text' || el.type === 'shape') {
+        patches[el.id] = { textStyle: { ...el.textStyle, fontSize: next } };
+      } else {
+        patches[el.id] = { fontSize: next };
+      }
+    }
+    if (Object.keys(patches).length > 0) useBoardStore.getState().updateElements(patches);
+  };
+
+  const single = els.length === 1 && cons.length === 0 ? els[0] : null;
+  const sizeTarget = single && single.type !== 'comment' && !single.locked ? single : null;
+  const commitDimension = (dim: 'width' | 'height', raw: string) => {
+    if (!sizeTarget) return;
+    const v = Number(raw);
+    if (!Number.isFinite(v)) return;
+    const next = clamp(Math.round(v), 8, 100000);
+    if (Math.round(sizeTarget[dim]) === next) return;
+    useBoardStore.getState().updateElements({ [sizeTarget.id]: { [dim]: next } });
+  };
+
   return (
     <div className="style-panel" onPointerDown={(e) => e.stopPropagation()}>
+      {sizeTarget && (
+        <Section label="Size">
+          <div className="btn-row">
+            <label className="size-field">
+              W
+              <input
+                key={`${sizeTarget.id}:w:${Math.round(sizeTarget.width)}`}
+                className="size-input"
+                type="number"
+                min={8}
+                defaultValue={Math.round(sizeTarget.width)}
+                onBlur={(e) => commitDimension('width', e.target.value)}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                }}
+              />
+            </label>
+            {sizeTarget.type !== 'text' && (
+              <label className="size-field">
+                H
+                <input
+                  key={`${sizeTarget.id}:h:${Math.round(sizeTarget.height)}`}
+                  className="size-input"
+                  type="number"
+                  min={8}
+                  defaultValue={Math.round(sizeTarget.height)}
+                  onBlur={(e) => commitDimension('height', e.target.value)}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                  }}
+                />
+              </label>
+            )}
+          </div>
+        </Section>
+      )}
       {stickies.length > 0 && (
         <Section label="Sticky color">
           <ColorField
@@ -172,69 +256,65 @@ export function StylePanel() {
         </>
       )}
 
-      {textEls.length > 0 && firstText && (
+      {sizables.length > 0 && (
         <Section label="Text">
           <div className="btn-row">
-            <button
-              className="mini-btn"
-              title="Smaller"
-              onClick={() =>
-                patchEls(
-                  (el) => el.type === 'text' || el.type === 'shape',
-                  (el) => {
-                    const ts = (el as { textStyle: TextStyle }).textStyle;
-                    return { textStyle: { ...ts, fontSize: Math.max(6, Math.round(ts.fontSize / 1.2)) } };
-                  },
-                )
-              }
-            >
+            <button className="mini-btn" title="Smaller text" onClick={() => scaleFonts(1 / 1.2)}>
               A−
             </button>
-            <span className="mini-value">{Math.round(firstText.textStyle.fontSize)}</span>
-            <button
-              className="mini-btn"
-              title="Larger"
-              onClick={() =>
-                patchEls(
-                  (el) => el.type === 'text' || el.type === 'shape',
-                  (el) => {
-                    const ts = (el as { textStyle: TextStyle }).textStyle;
-                    return { textStyle: { ...ts, fontSize: Math.min(400, Math.round(ts.fontSize * 1.2)) } };
-                  },
-                )
-              }
-            >
+            <span className="mini-value">{Math.round(effectiveFontSize(sizables[0]))}</span>
+            <button className="mini-btn" title="Larger text" onClick={() => scaleFonts(1.2)}>
               A+
             </button>
-            <button
-              className={`mini-btn ${firstText.textStyle.bold ? 'active' : ''}`}
-              title="Bold"
-              style={{ fontWeight: 700 }}
-              onClick={() => patchTextStyle({ bold: !firstText.textStyle.bold })}
-            >
-              B
-            </button>
-            {(['left', 'center', 'right'] as const).map((a) => (
+            {stickies.length > 0 && (
               <button
-                key={a}
-                className={`mini-btn ${firstText.textStyle.align === a ? 'active' : ''}`}
-                title={`Align ${a}`}
-                onClick={() => patchTextStyle({ align: a })}
+                className={`mini-btn ${allStickiesAuto ? 'active' : ''}`}
+                title="Auto-size text with the sticky's width"
+                onClick={() =>
+                  patchEls(
+                    (el) => el.type === 'sticky',
+                    () => ({ fontSize: null }),
+                  )
+                }
               >
-                <AlignIcon align={a} />
+                Auto
               </button>
-            ))}
-          </div>
-          <ColorField
-            presets={TEXT_COLORS}
-            value={firstText.textStyle.color}
-            {...colorHandlers(
-              textEls.map((el) => el.id),
-              (color, el) => ({
-                textStyle: { ...(el as { textStyle: TextStyle }).textStyle, color },
-              }),
             )}
-          />
+            {firstText && (
+              <>
+                <button
+                  className={`mini-btn ${firstText.textStyle.bold ? 'active' : ''}`}
+                  title="Bold"
+                  style={{ fontWeight: 700 }}
+                  onClick={() => patchTextStyle({ bold: !firstText.textStyle.bold })}
+                >
+                  B
+                </button>
+                {(['left', 'center', 'right'] as const).map((a) => (
+                  <button
+                    key={a}
+                    className={`mini-btn ${firstText.textStyle.align === a ? 'active' : ''}`}
+                    title={`Align ${a}`}
+                    onClick={() => patchTextStyle({ align: a })}
+                  >
+                    <AlignIcon align={a} />
+                  </button>
+                ))}
+              </>
+            )}
+          </div>
+          {firstText && (
+            <ColorField
+              presets={TEXT_COLORS}
+              value={firstText.textStyle.color}
+              {...colorHandlers(
+                textEls.map((el) => el.id),
+                (color, el) => ({
+                  textStyle: { ...(el as { textStyle: TextStyle }).textStyle, color },
+                }),
+              )}
+            />
+          )}
         </Section>
       )}
 

@@ -237,11 +237,15 @@ export function handleResizeHandleDown(e: React.PointerEvent, dir: HandleDir): v
   if (!startBox) return;
   const startRects: Record<string, Rect> = {};
   const startFonts: Record<string, TextStyle> = {};
+  const startPlainFonts: Record<string, number> = {};
   for (const id of closure) {
     const el = elements[id];
     if (!el) continue;
     startRects[id] = { x: el.x, y: el.y, width: el.width, height: el.height };
     if (el.type === 'text' || el.type === 'shape') startFonts[id] = el.textStyle;
+    if ((el.type === 'sticky' || el.type === 'link') && el.fontSize != null) {
+      startPlainFonts[id] = el.fontSize;
+    }
   }
 
   const aspectDefault = els.length > 1 || single?.type === 'image';
@@ -283,6 +287,10 @@ export function handleResizeHandleDown(e: React.PointerEvent, dir: HandleDir): v
             ...f0,
             fontSize: clamp(Math.round(f0.fontSize * fontScale), 6, 400),
           };
+        }
+        const pf0 = startPlainFonts[id];
+        if (pf0 !== undefined && corner) {
+          patches[id].fontSize = clamp(Math.round(pf0 * fontScale), 6, 400);
         }
       }
       board().applyTransient(

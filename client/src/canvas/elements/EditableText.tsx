@@ -15,6 +15,8 @@ export function textCss(ts: TextStyle): CSSProperties {
 interface Props {
   value: string;
   editing: boolean;
+  /** Id of the element that owns this text (guards the unmount commit). */
+  ownerId: string;
   onCommit(next: string): void;
   style?: CSSProperties;
   className?: string;
@@ -26,6 +28,7 @@ interface Props {
 export function EditableText({
   value,
   editing,
+  ownerId,
   onCommit,
   style,
   className,
@@ -42,6 +45,7 @@ export function EditableText({
   return (
     <TextEditor
       value={value}
+      ownerId={ownerId}
       onCommit={onCommit}
       style={style}
       className={className}
@@ -52,6 +56,7 @@ export function EditableText({
 
 function TextEditor({
   value,
+  ownerId,
   onCommit,
   style,
   className,
@@ -60,6 +65,8 @@ function TextEditor({
   const [text, setText] = useState(value);
   const ref = useRef<HTMLTextAreaElement>(null);
   const committed = useRef(false);
+  const latest = useRef(text);
+  latest.current = text;
 
   useEffect(() => {
     const node = ref.current;
@@ -83,6 +90,21 @@ function TextEditor({
     const u = useUiStore.getState();
     if (u.editingId !== null) u.setEditing(null);
   };
+  const commitLatest = useRef(() => commit(latest.current));
+  commitLatest.current = () => commit(latest.current);
+
+  // Clicking elsewhere clears editingId on pointerdown, which unmounts this
+  // editor BEFORE any blur event can fire — without this unmount commit, the
+  // typed text would be silently discarded. StrictMode guard: during dev's
+  // simulated mount→cleanup→mount cycle this element is STILL being edited,
+  // and committing then would disarm the editor — so only commit when the
+  // edit has genuinely moved on.
+  useEffect(
+    () => () => {
+      if (useUiStore.getState().editingId !== ownerId) commitLatest.current();
+    },
+    [ownerId],
+  );
 
   return (
     <textarea
