@@ -26,7 +26,14 @@ import { computeResizedBox, type HandleDir, isCorner } from '../geometry/resizeB
 import { frameCount, useBoardStore, type ElementPatch } from '../state/boardStore';
 import { useUiStore } from '../state/uiStore';
 import { screenToWorldPt, useViewportStore } from '../state/viewportStore';
-import { collectPayload, moveClosure, pastePayload } from './actions';
+import {
+  type CarriedPoint,
+  carriedConnectorPoints,
+  carriedPointPatches,
+  collectPayload,
+  moveClosure,
+  pastePayload,
+} from './actions';
 import { passedThreshold, startPointerSession } from './session';
 
 const board = () => useBoardStore.getState();
@@ -131,11 +138,17 @@ function beginMoveDrag(e: React.PointerEvent, grabbedId: string, onPlainClick?: 
   let closure = moveClosure(selectionIds);
   if (closure.size === 0) return;
 
-  board().beginTransient(Array.from(closure));
   let started = false;
   let startPositions: Record<string, Point> = {};
+  let carried: CarriedPoint[] = [];
 
-  const captureStarts = () => {
+  const beginDragTransient = () => {
+    // free connector endpoints inside a moving frame travel with it
+    carried = carriedConnectorPoints(closure);
+    board().beginTransient(
+      Array.from(closure),
+      Array.from(new Set(carried.map((c) => c.id))),
+    );
     const { elements } = board();
     startPositions = {};
     for (const id of closure) {
@@ -151,15 +164,12 @@ function beginMoveDrag(e: React.PointerEvent, grabbedId: string, onPlainClick?: 
         if (!passedThreshold(startScreen, ev)) return;
         started = true;
         if (ev.altKey) {
-          // alt-drag duplicates: drop the transient on the originals, copy in
-          // place, and drag the copies instead
-          board().cancelTransient();
+          // alt-drag duplicates: copy in place and drag the copies instead
           duplicateInPlace();
           selectionIds = ui().selection;
           closure = moveClosure(selectionIds);
-          board().beginTransient(Array.from(closure));
         }
-        captureStarts();
+        beginDragTransient();
         uiSet({ interaction: 'move' });
       }
       const cur = worldPoint(ev);
@@ -169,7 +179,12 @@ function beginMoveDrag(e: React.PointerEvent, grabbedId: string, onPlainClick?: 
       for (const [id, p] of Object.entries(startPositions)) {
         patches[id] = { x: p.x + dx, y: p.y + dy };
       }
-      board().applyTransient(patches);
+      board().applyTransient(
+        patches,
+        carried.length > 0
+          ? carriedPointPatches(carried, (p) => ({ x: p.x + dx, y: p.y + dy }))
+          : undefined,
+      );
 
       // frame drop highlight follows the grabbed element's center
       const { elements, order } = board();
@@ -186,7 +201,6 @@ function beginMoveDrag(e: React.PointerEvent, grabbedId: string, onPlainClick?: 
     },
     onEnd: () => {
       if (!started) {
-        board().cancelTransient();
         if (onPlainClick) onPlainClick();
         else if (!shift && selectionIds.length > 1) ui().setSelection([grabbedId]);
         uiSet({ interaction: 'idle', dropFrameId: null });
@@ -231,7 +245,10 @@ export function handleResizeHandleDown(e: React.PointerEvent, dir: HandleDir): v
   }
 
   const aspectDefault = els.length > 1 || single?.type === 'image';
-  board().beginTransient(Array.from(closure));
+  // free connector endpoints inside a scaling frame map through the same
+  // transform as its children (edge-resize leaves children — and points — put)
+  const carried = frameEdgeOnly ? [] : carriedConnectorPoints(closure);
+  board().beginTransient(Array.from(closure), Array.from(new Set(carried.map((c) => c.id))));
   uiSet({ interaction: 'resize' });
 
   startPointerSession({
@@ -268,7 +285,20 @@ export function handleResizeHandleDown(e: React.PointerEvent, dir: HandleDir): v
           };
         }
       }
-      board().applyTransient(patches);
+      board().applyTransient(
+        patches,
+        carried.length > 0
+          ? carriedPointPatches(carried, (p) => {
+              const r = scaleChildWithFrame(startBox, newBox, {
+                x: p.x,
+                y: p.y,
+                width: 0,
+                height: 0,
+              });
+              return { x: r.x, y: r.y };
+            })
+          : undefined,
+      );
     },
     onEnd: () => {
       board().endTransient();
@@ -376,6 +406,27 @@ function beginDrawRect(e: React.PointerEvent, which: 'shape' | 'frame'): void {
 // ---------------------------------------------------------------------------
 // Draw connector / line
 
+const FRAME_TARGET_BORDER = 16; // world px
+
+/**
+ * Element under the pointer that a connector may attach to. Frames only count
+ * near their border — deep inside a frame body reads as empty canvas, so free
+ * lines drawn inside frames stay free (explicit frame connections still work
+ * via the frame's ports).
+ */
+function connectorTargetAt(pt: Point, excludeIds?: ReadonlySet<string>): string | null {
+  const s = board();
+  const el = topElementAt(s.elements, s.order, pt, { excludeIds });
+  if (!el || el.type === 'comment') return null;
+  if (el.type === 'frame') {
+    const b = FRAME_TARGET_BORDER;
+    const nearBorder =
+      pt.x < el.x + b || pt.x > el.x + el.width - b || pt.y < el.y + b || pt.y > el.y + el.height - b;
+    if (!nearBorder) return null;
+  }
+  return el.id;
+}
+
 function beginDrawConnector(
   e: { clientX: number; clientY: number },
   from: Attachment,
@@ -405,11 +456,9 @@ function beginDrawConnector(
         const len = Math.hypot(dx, dy);
         pt = { x: start.x + Math.cos(angle) * len, y: start.y + Math.sin(angle) * len };
       }
-      const s = board();
       const exclude = new Set<string>();
       if (fromElementId) exclude.add(fromElementId);
-      const target = topElementAt(s.elements, s.order, pt, { excludeIds: exclude });
-      const targetId = target && target.type !== 'comment' ? target.id : null;
+      const targetId = connectorTargetAt(pt, exclude);
       const d = ui().draftConnector;
       if (d) uiSet({ draftConnector: { ...d, toPoint: pt, toElementId: targetId } });
     },
@@ -453,11 +502,10 @@ export function handleConnectorEndpointDown(
       const otherEnd = end === 'from' ? c.to : c.from;
       const exclude = new Set<string>();
       if (otherEnd.kind === 'element') exclude.add(otherEnd.elementId);
-      const target = topElementAt(s.elements, s.order, pt, { excludeIds: exclude });
-      const att: Attachment =
-        target && target.type !== 'comment'
-          ? { kind: 'element', elementId: target.id, side: 'auto' }
-          : { kind: 'point', x: pt.x, y: pt.y };
+      const targetId = connectorTargetAt(pt, exclude);
+      const att: Attachment = targetId
+        ? { kind: 'element', elementId: targetId, side: 'auto' }
+        : { kind: 'point', x: pt.x, y: pt.y };
       s.applyTransient(undefined, { [id]: { [end]: att } });
       uiSet({ connectorTargetId: att.kind === 'element' ? att.elementId : null });
     },
@@ -640,11 +688,10 @@ export function handleCanvasPointerDown(e: React.PointerEvent): void {
       beginDrawConnector(e, { kind: 'point', x: pt.x, y: pt.y }, { arrowEnd: false });
       break;
     case 'connector': {
-      const target = topElementAt(s.elements, s.order, pt);
-      const from: Attachment =
-        target && target.type !== 'comment'
-          ? { kind: 'element', elementId: target.id, side: 'auto' }
-          : { kind: 'point', x: pt.x, y: pt.y };
+      const targetId = connectorTargetAt(pt);
+      const from: Attachment = targetId
+        ? { kind: 'element', elementId: targetId, side: 'auto' }
+        : { kind: 'point', x: pt.x, y: pt.y };
       beginDrawConnector(e, from, { arrowEnd: true });
       break;
     }

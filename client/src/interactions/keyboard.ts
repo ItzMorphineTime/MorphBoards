@@ -2,6 +2,8 @@ import { useBoardStore, type ElementPatch } from '../state/boardStore';
 import { useUiStore, type Tool } from '../state/uiStore';
 import { useViewportStore } from '../state/viewportStore';
 import {
+  carriedConnectorPoints,
+  carriedPointPatches,
   copySelection,
   cutSelection,
   deleteSelection,
@@ -37,7 +39,11 @@ function nudgeSelection(dx: number, dy: number): void {
     const el = elements[id];
     if (el) patches[id] = { x: el.x + dx, y: el.y + dy };
   }
-  board().updateElements(patches);
+  const carried = carriedConnectorPoints(ids);
+  board().updateMixed(
+    patches,
+    carriedPointPatches(carried, (p) => ({ x: p.x + dx, y: p.y + dy })),
+  );
 }
 
 function handleEscape(): void {

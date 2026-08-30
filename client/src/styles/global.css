@@ -900,6 +900,24 @@ textarea {
     var(--canvas-bg);
 }
 
+.swatch.custom {
+  position: relative;
+  display: inline-block;
+  background: conic-gradient(#ff5f5f, #ffc94f, #6fe07c, #57c7ff, #b197fc, #ff5f5f);
+  cursor: pointer;
+  overflow: hidden;
+}
+.swatch.custom input[type='color'] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+}
+
 .btn-row {
   display: flex;
   align-items: center;

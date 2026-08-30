@@ -8,31 +8,11 @@ import {
 import { deleteSelection, toggleLockSelection } from '../interactions/actions';
 import { useBoardStore, type ElementPatch } from '../state/boardStore';
 import { useUiStore } from '../state/uiStore';
+import { ColorField } from './ColorField';
 import { Icons } from './icons';
 
-function Swatches({
-  colors,
-  onPick,
-  active,
-}: {
-  colors: string[];
-  onPick(color: string): void;
-  active?: string;
-}) {
-  return (
-    <div className="swatch-row">
-      {colors.map((c) => (
-        <button
-          key={c}
-          className={`swatch ${c === 'transparent' ? 'transparent' : ''} ${active === c ? 'active' : ''}`}
-          style={c === 'transparent' ? undefined : { background: c }}
-          title={c}
-          onClick={() => onPick(c)}
-        />
-      ))}
-    </div>
-  );
-}
+const FILL_PRESETS = ELEMENT_COLORS.filter((c) => c !== 'transparent');
+const STROKE_PRESETS = STROKE_COLORS.filter((c) => c !== 'transparent');
 
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -41,6 +21,35 @@ function Section({ label, children }: { label: string; children: React.ReactNode
       {children}
     </div>
   );
+}
+
+/**
+ * Preview-capable color application: start opens one transient session over
+ * the targets, apply patches it live (native picker drags), end commits it
+ * as a single undo step.
+ */
+function colorHandlers(
+  elementIds: string[],
+  patchFor: (color: string, el: BoardElement) => ElementPatch,
+  connectorIds: string[] = [],
+  conPatchFor?: (color: string) => Partial<Connector>,
+) {
+  const store = () => useBoardStore.getState();
+  return {
+    onStart: () => store().beginTransient(elementIds, connectorIds),
+    onApply: (color: string) => {
+      const s = store();
+      const elPatches: Record<string, ElementPatch> = {};
+      for (const id of elementIds) {
+        const el = s.elements[id];
+        if (el) elPatches[id] = patchFor(color, el);
+      }
+      const conPatches: Record<string, Partial<Connector>> = {};
+      if (conPatchFor) for (const id of connectorIds) conPatches[id] = conPatchFor(color);
+      s.applyTransient(elPatches, conPatches);
+    },
+    onEnd: () => store().endTransient(),
+  };
 }
 
 export function StylePanel() {
@@ -87,29 +96,36 @@ export function StylePanel() {
   const link = els.length === 1 && els[0].type === 'link' ? els[0] : null;
   const firstText = textEls[0] as { textStyle: TextStyle } | undefined;
   const anyLocked = els.some((el) => el.locked);
+  const conIds = cons.map((c) => c.id);
 
   return (
     <div className="style-panel" onPointerDown={(e) => e.stopPropagation()}>
       {stickies.length > 0 && (
         <Section label="Sticky color">
-          <Swatches
-            colors={STICKY_COLORS}
-            active={stickies[0].type === 'sticky' ? stickies[0].color : undefined}
-            onPick={(color) => patchEls((el) => el.type === 'sticky', () => ({ color }))}
+          <ColorField
+            presets={STICKY_COLORS}
+            value={stickies[0].type === 'sticky' ? stickies[0].color : undefined}
+            {...colorHandlers(
+              stickies.map((el) => el.id),
+              (color) => ({ color }),
+            )}
           />
         </Section>
       )}
 
       {fillables.length > 0 && (
         <Section label="Fill">
-          <Swatches
-            colors={ELEMENT_COLORS}
-            onPick={(fill) =>
-              patchEls(
-                (el) => el.type === 'shape' || el.type === 'frame',
-                (el) => (el.type === 'frame' ? { fill: fill === 'transparent' ? 'rgba(255,255,255,0.04)' : fill } : { fill }),
-              )
-            }
+          <ColorField
+            presets={FILL_PRESETS}
+            allowTransparent
+            value={'fill' in fillables[0] ? (fillables[0] as { fill: string }).fill : undefined}
+            {...colorHandlers(
+              fillables.map((el) => el.id),
+              (color, el) =>
+                el.type === 'frame'
+                  ? { fill: color === 'transparent' ? 'rgba(255,255,255,0.04)' : color }
+                  : { fill: color },
+            )}
           />
         </Section>
       )}
@@ -117,15 +133,20 @@ export function StylePanel() {
       {shapes.length > 0 && (
         <>
           <Section label="Stroke">
-            <Swatches
-              colors={STROKE_COLORS}
-              onPick={(stroke) => patchEls((el) => el.type === 'shape', () => ({ stroke }))}
+            <ColorField
+              presets={STROKE_PRESETS}
+              allowTransparent
+              value={shapes[0].type === 'shape' ? shapes[0].stroke : undefined}
+              {...colorHandlers(
+                shapes.map((el) => el.id),
+                (stroke) => ({ stroke }),
+              )}
             />
             <div className="btn-row">
               {[1, 2, 4, 8].map((w) => (
                 <button
                   key={w}
-                  className="mini-btn"
+                  className={`mini-btn ${shapes[0].type === 'shape' && shapes[0].strokeWidth === w ? 'active' : ''}`}
                   title={`Stroke width ${w}`}
                   onClick={() => patchEls((el) => el.type === 'shape', () => ({ strokeWidth: w }))}
                 >
@@ -204,10 +225,15 @@ export function StylePanel() {
               </button>
             ))}
           </div>
-          <Swatches
-            colors={TEXT_COLORS}
-            active={firstText.textStyle.color}
-            onPick={(color) => patchTextStyle({ color })}
+          <ColorField
+            presets={TEXT_COLORS}
+            value={firstText.textStyle.color}
+            {...colorHandlers(
+              textEls.map((el) => el.id),
+              (color, el) => ({
+                textStyle: { ...(el as { textStyle: TextStyle }).textStyle, color },
+              }),
+            )}
           />
         </Section>
       )}
@@ -276,31 +302,24 @@ export function StylePanel() {
               </button>
             ))}
           </div>
-          <Swatches
-            colors={STROKE_COLORS.filter((c) => c !== 'transparent')}
-            active={cons[0].stroke}
-            onPick={(stroke) => patchCons({ stroke })}
+          <ColorField
+            presets={STROKE_PRESETS}
+            value={cons[0].stroke}
+            {...colorHandlers([], () => ({}), conIds, (stroke) => ({ stroke }))}
           />
         </Section>
       )}
 
-      {els.length > 0 && (
-        <div className="panel-footer">
+      <div className="panel-footer">
+        {els.length > 0 && (
           <button className="mini-btn" title={anyLocked ? 'Unlock' : 'Lock'} onClick={toggleLockSelection}>
             {Icons.lock({ size: 15 })}
           </button>
-          <button className="mini-btn danger" title="Delete (Del)" onClick={deleteSelection}>
-            {Icons.trash({ size: 15 })}
-          </button>
-        </div>
-      )}
-      {els.length === 0 && cons.length > 0 && (
-        <div className="panel-footer">
-          <button className="mini-btn danger" title="Delete (Del)" onClick={deleteSelection}>
-            {Icons.trash({ size: 15 })}
-          </button>
-        </div>
-      )}
+        )}
+        <button className="mini-btn danger" title="Delete (Del)" onClick={deleteSelection}>
+          {Icons.trash({ size: 15 })}
+        </button>
+      </div>
     </div>
   );
 }

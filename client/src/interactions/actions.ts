@@ -4,7 +4,7 @@ import {
   type Connector,
   newId,
 } from '@morphboards/shared';
-import { type Point, unionRects } from '../geometry/geo';
+import { type Point, rectContainsPoint, unionRects } from '../geometry/geo';
 import { useBoardStore } from '../state/boardStore';
 import { useUiStore } from '../state/uiStore';
 import { useViewportStore } from '../state/viewportStore';
@@ -26,6 +26,54 @@ export function moveClosure(ids: readonly string[]): Set<string> {
     if (el.type === 'comment' && el.attachedTo && set.has(el.attachedTo)) set.add(el.id);
   }
   return set;
+}
+
+export interface CarriedPoint {
+  id: string;
+  end: 'from' | 'to';
+  x: number;
+  y: number;
+}
+
+/**
+ * Free (point) connector endpoints that sit inside a frame being moved.
+ * Element-attached ends follow automatically because connector geometry is
+ * derived from element rects — free points have to be carried explicitly,
+ * otherwise lines and arrow tips get left behind when their frame moves.
+ */
+export function carriedConnectorPoints(closure: ReadonlySet<string>): CarriedPoint[] {
+  const { elements, connectors } = board();
+  const frames: BoardElement[] = [];
+  for (const id of closure) {
+    const el = elements[id];
+    if (el?.type === 'frame') frames.push(el);
+  }
+  if (frames.length === 0) return [];
+  const carried: CarriedPoint[] = [];
+  for (const c of Object.values(connectors)) {
+    for (const end of ['from', 'to'] as const) {
+      const att = c[end];
+      if (att.kind !== 'point') continue;
+      if (frames.some((f) => rectContainsPoint(f, att))) {
+        carried.push({ id: c.id, end, x: att.x, y: att.y });
+      }
+    }
+  }
+  return carried;
+}
+
+/** Merge carried points (mapped through `map`) into per-connector patches. */
+export function carriedPointPatches(
+  carried: readonly CarriedPoint[],
+  map: (p: Point) => Point,
+): Record<string, Partial<Connector>> {
+  const patches: Record<string, Partial<Connector>> = {};
+  for (const cp of carried) {
+    const mapped = map(cp);
+    const patch = (patches[cp.id] ??= {});
+    patch[cp.end] = { kind: 'point', x: mapped.x, y: mapped.y };
+  }
+  return patches;
 }
 
 export function deleteSelection(): void {
@@ -66,14 +114,18 @@ export function collectPayload(): ClipboardPayload | null {
   const els = Array.from(ids)
     .map((id) => elements[id])
     .filter((el): el is BoardElement => Boolean(el));
-  const includesEnd = (att: Attachment) => att.kind === 'point' || ids.has(att.elementId);
+  const copiedFrames = els.filter((el) => el.type === 'frame');
+  // A point end counts as "anchored to the copied set" when it sits inside a
+  // copied frame, or when the connector's other end is a copied element.
+  const endAnchored = (att: Attachment, other: Attachment) =>
+    att.kind === 'element'
+      ? ids.has(att.elementId)
+      : copiedFrames.some((f) => rectContainsPoint(f, att)) ||
+        (other.kind === 'element' && ids.has(other.elementId));
   const cs = Object.values(connectors).filter(
     (c) =>
       selectedConnectors.includes(c.id) ||
-      (ids.size > 0 &&
-        includesEnd(c.from) &&
-        includesEnd(c.to) &&
-        (c.from.kind === 'element' || c.to.kind === 'element')),
+      (ids.size > 0 && endAnchored(c.from, c.to) && endAnchored(c.to, c.from)),
   );
   if (els.length === 0 && cs.length === 0) return null;
   return JSON.parse(JSON.stringify({ elements: els, connectors: cs })) as ClipboardPayload;

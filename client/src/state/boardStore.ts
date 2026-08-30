@@ -59,6 +59,11 @@ interface BoardStore {
   removeElements(ids: string[]): void;
   addConnectors(cs: Connector[]): void;
   updateConnectors(patches: Record<string, ConnectorPatch>): void;
+  /** Patch elements and connectors together as ONE undo step. */
+  updateMixed(
+    elementPatches: Record<string, ElementPatch>,
+    connectorPatches: Record<string, ConnectorPatch>,
+  ): void;
   removeConnectors(ids: string[]): void;
   removeMixed(elementIds: string[], connectorIds: string[]): void;
   reorder(ids: string[], mode: 'front' | 'back' | 'forward' | 'backward'): void;
@@ -263,14 +268,28 @@ export const useBoardStore = create<BoardStore>()((set, get) => {
     },
 
     updateConnectors: (patches) => {
+      get().updateMixed({}, patches);
+    },
+
+    updateMixed: (elementPatches, connectorPatches) => {
       const s = get();
-      const entry: HistoryEntry = { connectors: {} };
-      for (const [id, patch] of Object.entries(patches)) {
+      const entry: HistoryEntry = { elements: {}, connectors: {} };
+      for (const [id, patch] of Object.entries(elementPatches)) {
+        const prev = s.elements[id];
+        if (!prev) continue;
+        entry.elements![id] = { before: prev, after: mergeElement(prev, patch) };
+      }
+      for (const [id, patch] of Object.entries(connectorPatches)) {
         const prev = s.connectors[id];
         if (!prev) continue;
         entry.connectors![id] = { before: prev, after: { ...prev, ...patch } };
       }
-      if (Object.keys(entry.connectors!).length === 0) return;
+      if (
+        Object.keys(entry.elements!).length === 0 &&
+        Object.keys(entry.connectors!).length === 0
+      ) {
+        return;
+      }
       commitEntry(entry);
     },
 
