@@ -100,7 +100,10 @@ export function Overlay() {
     .map((id) => elements[id])
     .filter((el): el is BoardElement => Boolean(el) && !el.locked);
   const bbox = unionRects(selectedEls);
-  const showBox = bbox && interaction !== 'marquee' && interaction !== 'connect' && !editingId;
+  // a lone pin draws its own selection ring at its constant screen size
+  const lonePin = selectedEls.length === 1 && selectedEls[0].type === 'comment';
+  const showBox =
+    bbox && !lonePin && interaction !== 'marquee' && interaction !== 'connect' && !editingId;
   const showHandles = showBox && (interaction === 'idle' || interaction === 'resize');
   const screenBox = bbox ? worldRectToScreen(vp, bbox) : null;
 

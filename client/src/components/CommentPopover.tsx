@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { newId } from '@morphboards/shared';
+import { COMMENT_PIN_SIZE } from '../defaults';
 import { worldToScreen } from '../geometry/geo';
 import { useBoardStore } from '../state/boardStore';
 import { useCanComment, useSessionStore } from '../state/sessionStore';
@@ -35,9 +36,10 @@ export function CommentPopover() {
 
   if (!id || !el || el.type !== 'comment') return null;
 
-  const pos = worldToScreen(vp, { x: el.x + el.width, y: el.y });
-  const left = Math.min(Math.max(pos.x + 10, 8), Math.max(vp.size.width - 328, 8));
-  const top = Math.min(Math.max(pos.y - 8, 8), Math.max(vp.size.height - 320, 8));
+  // pins render at a constant screen size anchored on their tip (bottom-left)
+  const tip = worldToScreen(vp, { x: el.x, y: el.y + el.height });
+  const left = Math.min(Math.max(tip.x + COMMENT_PIN_SIZE + 10, 8), Math.max(vp.size.width - 328, 8));
+  const top = Math.min(Math.max(tip.y - COMMENT_PIN_SIZE - 8, 8), Math.max(vp.size.height - 320, 8));
 
   const submit = () => {
     const trimmed = text.trim();

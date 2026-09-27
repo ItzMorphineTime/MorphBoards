@@ -68,11 +68,21 @@ export const ElementView = memo(function ElementView({ id }: { id: string }) {
     <div
       className={cls}
       data-element-id={id}
-      style={{
-        transform: `translate(${el.x}px, ${el.y}px)`,
-        width: el.width,
-        height: el.height,
-      }}
+      style={
+        el.type === 'comment'
+          ? {
+              // pins keep a constant screen size, pivoting on their tip
+              transform: `translate(${el.x}px, ${el.y}px) scale(var(--inv-zoom, 1))`,
+              transformOrigin: '0 100%',
+              width: el.width,
+              height: el.height,
+            }
+          : {
+              transform: `translate(${el.x}px, ${el.y}px)`,
+              width: el.width,
+              height: el.height,
+            }
+      }
       onPointerDown={(e) => handleElementPointerDown(e, id)}
       onDoubleClick={(e) => handleElementDoubleClick(e, id)}
       onPointerEnter={() => {

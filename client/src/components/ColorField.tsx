@@ -116,7 +116,7 @@ export function ColorField({
         <input
           ref={inputRef}
           type="color"
-          value={liveValue ?? asHex(value) ?? '#4f8cff'}
+          value={liveValue ?? asHex(value) ?? '#c51622'}
           onChange={(e) => {
             // synthetic change ≙ native input: live preview while picking
             const color = e.target.value;

@@ -46,10 +46,12 @@ export function BoardsHome() {
   return (
     <div className="home">
       <div className="home-header">
-        <div className="home-brand">
-          <span className="home-logo" />
-          MorphBoards
-        </div>
+        <img
+          className="home-lockup"
+          src="/brand/morph-dark-event-lockup.svg"
+          alt="Morph Interactive Media"
+          draggable={false}
+        />
         <div className="home-actions">
           <button className="secondary-btn" onClick={() => importRef.current?.click()}>
             {Icons.upload({ size: 15 })} Import
@@ -69,6 +71,18 @@ export function BoardsHome() {
             {Icons.plus({ size: 15 })} New board
           </button>
         </div>
+      </div>
+
+      <div className="home-heading">
+        <span className="eyebrow">Morph / Boards</span>
+        <h1 className="home-title">Shot boards</h1>
+        <span className="home-rule" aria-hidden="true" />
+        {boards !== null && boards.length > 0 && (
+          <span className="home-count">
+            {boards.length} board{boards.length === 1 ? '' : 's'} · last edited{' '}
+            {timeAgo(Math.max(...boards.map((b) => b.updatedAt)))}
+          </span>
+        )}
       </div>
 
       {error && <div className="home-error">Could not reach the server: {error}</div>}

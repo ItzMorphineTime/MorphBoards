@@ -4,3 +4,7 @@ server/data/
 *.log
 .DS_Store
 *.local
+
+# Brand source kit (logos, PDFs). The app ships only the files it uses,
+# copied into client/public/brand/.
+/Morph Brand Assets/

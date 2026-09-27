@@ -113,7 +113,7 @@ export function StickyView({ el, editing }: ViewProps<StickyElement>) {
         value={el.text}
         editing={editing}
         ownerId={el.id}
-        style={{ fontSize, color: '#1f2329', textAlign: 'center', fontWeight: 500, lineHeight: 1.35 }}
+        style={{ fontSize, color: '#0a0a0a', textAlign: 'center', fontWeight: 500, lineHeight: 1.35 }}
         onCommit={(text) => commitText(el.id, { text })}
       />
     </div>

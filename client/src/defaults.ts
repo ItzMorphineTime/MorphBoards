@@ -21,43 +21,49 @@ export const TEXT_WIDTH = 280;
 export const COMMENT_PIN_SIZE = 32;
 export const LINK_CARD = { width: 300, height: 76 };
 
+// Presets lead with the Morph brand colours (Morph Black #0a0a0a, Signal Red
+// #c51622, Studio White #ffffff, Pivot Gold #f2b705, Muted #6c6c6c, Border
+// #d4d4d4), then add tints for categorising content on a Morph Black canvas.
+
+/** Sticky text is always Morph Black, so every sticky colour stays light. */
 export const STICKY_COLORS = [
-  '#fff176',
-  '#ffb74d',
-  '#ff8a80',
-  '#f48fb1',
-  '#ce93d8',
-  '#90caf9',
-  '#80deea',
-  '#a5d6a7',
-  '#e0e0e0',
+  '#ffffff',
+  '#f2b705',
+  '#ffe8a3',
+  '#f6b3b6',
+  '#ffd1a6',
+  '#bfe3c9',
+  '#b9d8f7',
+  '#dccdf5',
+  '#d4d4d4',
 ];
 
 export const ELEMENT_COLORS = [
   'transparent',
-  '#2b3242',
-  '#3d4a63',
-  '#553d63',
-  '#63443d',
-  '#3d6349',
-  '#8a2e3c',
-  '#1f6feb',
-  '#b58a2e',
-  '#e8eaf0',
+  '#0a0a0a',
+  '#1c1c1c',
+  '#2e2e2e',
+  '#6c6c6c',
+  '#d4d4d4',
+  '#ffffff',
+  '#c51622',
+  '#f2b705',
+  '#5c0b10',
+  '#5a4402',
 ];
 
 export const STROKE_COLORS = [
-  '#8b93a7',
-  '#e8eaf0',
-  '#4f8cff',
-  '#ffc94f',
-  '#ff6b6b',
-  '#51cf66',
-  '#b197fc',
+  '#6c6c6c',
+  '#a3a3a3',
+  '#ffffff',
+  '#c51622',
+  '#f2b705',
+  '#d4d4d4',
+  '#0a0a0a',
   'transparent',
 ];
 
-export const TEXT_COLORS = ['#e8eaf0', '#9aa3b8', '#4f8cff', '#ffc94f', '#ff6b6b', '#51cf66', '#1e1e1e'];
+export const TEXT_COLORS = ['#ffffff', '#a3a3a3', '#6c6c6c', '#0a0a0a', '#c51622', '#ff5c63', '#f2b705'];
 
 export function makeShape(kind: ShapeKind, rect: Rect): ShapeElement {
   return {
@@ -65,12 +71,12 @@ export function makeShape(kind: ShapeKind, rect: Rect): ShapeElement {
     type: 'shape',
     ...rect,
     kind,
-    fill: '#2b3242',
-    stroke: '#8b93a7',
+    fill: '#1c1c1c',
+    stroke: '#6c6c6c',
     strokeWidth: 2,
     opacity: 1,
     text: '',
-    textStyle: { fontSize: 16, color: '#e8eaf0', align: 'center', bold: false },
+    textStyle: { fontSize: 16, color: '#ffffff', align: 'center', bold: false },
   };
 }
 
@@ -83,7 +89,7 @@ export function makeText(p: Point): TextElement {
     width: TEXT_WIDTH,
     height: 40,
     text: '',
-    textStyle: { fontSize: 24, color: '#e8eaf0', align: 'left', bold: false },
+    textStyle: { fontSize: 24, color: '#ffffff', align: 'left', bold: false },
   };
 }
 
@@ -162,7 +168,7 @@ export function makeConnector(from: Attachment, to: Attachment, opts?: Partial<C
     routing: 'straight',
     arrowStart: false,
     arrowEnd: true,
-    stroke: '#9aa3b8',
+    stroke: '#a3a3a3',
     strokeWidth: 2,
     ...opts,
   };

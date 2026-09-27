@@ -47,10 +47,14 @@ export function TopBar() {
   return (
     <div className="topbar">
       <div className="topbar-group">
-        {owner && (
-          <button className="ghost-btn" title="All boards" onClick={() => (location.hash = '#/')}>
-            {Icons.back({ size: 17 })}
+        {owner ? (
+          <button className="topbar-mark" title="All boards" onClick={() => (location.hash = '#/')}>
+            <img src="/brand/morph-monogram-dark.svg" alt="All boards" draggable={false} />
           </button>
+        ) : (
+          <span className="topbar-mark">
+            <img src="/brand/morph-monogram-dark.svg" alt="Morph" draggable={false} />
+          </span>
         )}
         {owner ? (
           <input
@@ -73,7 +77,7 @@ export function TopBar() {
         )}
         {liveStatus ? (
           <span
-            className={`save-status ${session.connected ? 'status-saved' : 'status-error'}`}
+            className={`save-status ${session.connected ? 'status-live' : 'status-offline'}`}
             title={session.connected ? 'Connected — changes sync live' : 'Connection lost — reconnecting'}
           >
             <span className="save-dot" />

@@ -78,9 +78,9 @@ function ConnectorPath({
       {mid && c.label && (
         <g>
           <rect
-            x={mid.x - (c.label.length * 7.5) / 2 - 6}
+            x={mid.x - (c.label.length * 8.4) / 2 - 6}
             y={mid.y - 11}
-            width={c.label.length * 7.5 + 12}
+            width={c.label.length * 8.4 + 12}
             height={22}
             rx={5}
             fill="var(--panel)"

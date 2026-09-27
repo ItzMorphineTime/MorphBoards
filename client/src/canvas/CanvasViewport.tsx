@@ -19,6 +19,9 @@ const BASE_GRID = 24;
 function applyViewportToDom(root: HTMLDivElement, world: HTMLDivElement): void {
   const { x, y, zoom } = useViewportStore.getState();
   world.style.transform = `translate(${x}px, ${y}px) scale(${zoom})`;
+  // lets frame titles and comment pins hold a constant on-screen size
+  world.style.setProperty('--zoom', String(zoom));
+  world.style.setProperty('--inv-zoom', String(1 / zoom));
 
   if (zoom < 0.08) {
     root.style.backgroundImage = 'none';

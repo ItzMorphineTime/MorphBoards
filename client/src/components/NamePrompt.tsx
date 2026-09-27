@@ -16,6 +16,7 @@ export function NamePrompt({ onSubmit }: { onSubmit(name: string): Promise<void>
   return (
     <div className="editor-message">
       <div className="name-prompt">
+        <img className="name-prompt-mark" src="/brand/morph-monogram-dark.svg" alt="Morph" draggable={false} />
         <div className="name-prompt-title">Join this board</div>
         <div className="name-prompt-sub">Pick a display name — it labels your cursor and comments.</div>
         <input
