@@ -20,8 +20,10 @@ import * as db from './db';
 interface Sock {
   send(data: string): void;
   close(code?: number, reason?: string): void;
+  ping(): void;
+  terminate(): void;
   on(event: 'message', fn: (data: Buffer | string) => void): void;
-  on(event: 'close', fn: () => void): void;
+  on(event: 'close' | 'pong', fn: () => void): void;
   on(event: 'error', fn: (err: Error) => void): void;
   readyState: number;
 }
@@ -32,7 +34,11 @@ interface ClientCtx {
   actor: ActorInfo;
   role: Capability;
   shareToken: string | null;
+  /** Answered the last heartbeat ping. */
+  alive: boolean;
 }
+
+const HEARTBEAT_MS = 25_000;
 
 interface Room {
   boardId: string;
@@ -226,6 +232,27 @@ export function kickShare(token: string): void {
 }
 
 export function registerRealtime(app: FastifyInstance): void {
+  // Reap connections that vanished without a close (sleeping laptops, dropped
+  // networks) so peers don't see ghosts; terminate() fires 'close' cleanup.
+  const heartbeat = setInterval(() => {
+    for (const room of rooms.values()) {
+      for (const ctx of room.clients) {
+        if (!ctx.alive) {
+          ctx.sock.terminate();
+          continue;
+        }
+        ctx.alive = false;
+        try {
+          ctx.sock.ping();
+        } catch {
+          ctx.sock.terminate();
+        }
+      }
+    }
+  }, HEARTBEAT_MS);
+  heartbeat.unref();
+  app.addHook('onClose', async () => clearInterval(heartbeat));
+
   app.get('/ws', { websocket: true }, (connection: unknown, req: FastifyRequest) => {
     // @fastify/websocket v11 passes the WebSocket directly; older versions
     // pass a stream object with .socket
@@ -259,8 +286,12 @@ export function registerRealtime(app: FastifyInstance): void {
       actor,
       role: role!,
       shareToken: shareToken ?? null,
+      alive: true,
     };
     room.clients.add(ctx);
+    sock.on('pong', () => {
+      ctx.alive = true;
+    });
 
     send(ctx, {
       t: 'snapshot',

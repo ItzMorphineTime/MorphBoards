@@ -97,7 +97,7 @@ export function resolveActor(req: FastifyRequest): ActorInfo | null {
   // this machine — otherwise share links can't be exercised locally
   const viaShareLink = shareTokenFrom(req) !== null;
   if (!viaShareLink && isLoopback(req)) {
-    return { id: 'owner', kind: 'owner', name: 'Owner', color: '#4f8cff' };
+    return { id: 'owner', kind: 'owner', name: 'Owner', color: '#2f6fe0' };
   }
   const guest = readGuest(req);
   if (guest) {

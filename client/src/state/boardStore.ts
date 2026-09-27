@@ -468,6 +468,11 @@ export const useBoardStore = create<BoardStore>()((set, get) => {
         }
         return { elements, connectors };
       });
+      // peers already saw the preview positions; send them back to the originals
+      previewEmitter?.(
+        elementsBefore as Record<string, ElementPatch>,
+        connectorsBefore as Record<string, ConnectorPatch>,
+      );
     },
 
     undo: () => {

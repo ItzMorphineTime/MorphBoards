@@ -216,15 +216,20 @@ export interface CommentAuthor {
   name: string;
 }
 
+/**
+ * Cursor, avatar and name-tag colours. Every tone carries white label text
+ * (about 4.5:1 or better) and stays clear of the brand's Signal Red and
+ * Pivot Gold, which already mean selection and comments.
+ */
 export const ACTOR_COLORS = [
-  '#4f8cff',
-  '#ff8a65',
-  '#ba68c8',
-  '#4db6ac',
-  '#f06292',
-  '#aed581',
-  '#ffd54f',
-  '#7986cb',
+  '#2f6fe0',
+  '#7b3fe4',
+  '#0b7d72',
+  '#b0258f',
+  '#c24e00',
+  '#2e7d32',
+  '#1f7a9c',
+  '#5d6bd6',
 ];
 
 export function colorForActor(id: string): string {

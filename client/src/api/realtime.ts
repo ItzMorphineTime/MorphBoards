@@ -46,6 +46,8 @@ interface ServerMessage {
 let ws: WebSocket | null = null;
 let selfPeerId: string | null = null;
 let closedByUs = false;
+/** Socket closed because the page was hidden (unload or back/forward cache). */
+let suspended = false;
 let reconnectTimer: number | null = null;
 let reconnectAttempts = 0;
 let currentOpts: { boardId?: string; shareToken?: string } | null = null;
@@ -256,6 +258,23 @@ function openSocket(): Promise<boolean> {
   });
 }
 
+// A page frozen in the back/forward cache keeps its socket open, so peers
+// would keep seeing a ghost of this tab. Leave the room whenever the page is
+// hidden, and rejoin if it is restored.
+function onPageHide(): void {
+  if (!ws) return;
+  suspended = true;
+  closedByUs = true;
+  ws.close();
+}
+
+function onPageShow(e: PageTransitionEvent): void {
+  if (!e.persisted || !suspended || !currentOpts) return;
+  suspended = false;
+  closedByUs = false;
+  void openSocket();
+}
+
 /**
  * Open a live session. Resolves true once the first snapshot has loaded the
  * board; false when the socket can't connect (caller may fall back to REST).
@@ -263,17 +282,22 @@ function openSocket(): Promise<boolean> {
 export async function connectRealtime(opts: { boardId?: string; shareToken?: string }): Promise<boolean> {
   disconnectRealtime();
   closedByUs = false;
+  suspended = false;
   currentOpts = opts;
   setOpEmitter(sendDiff);
   setPreviewEmitter(queuePreview);
   unsubscribeSelection = useUiStore.subscribe((s, prev) => {
     if (s.selection !== prev.selection) schedulePresence();
   });
+  window.addEventListener('pagehide', onPageHide);
+  window.addEventListener('pageshow', onPageShow);
   return openSocket();
 }
 
 export function disconnectRealtime(): void {
   closedByUs = true;
+  window.removeEventListener('pagehide', onPageHide);
+  window.removeEventListener('pageshow', onPageShow);
   if (reconnectTimer !== null) {
     window.clearTimeout(reconnectTimer);
     reconnectTimer = null;
